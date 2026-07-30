@@ -1,0 +1,228 @@
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --border: #e2e5ea;
+  --text: #1f2329;
+  --muted: #8a9099;
+  --primary: #2f6bff;
+  --primary-d: #1f53d6;
+  --green: #1f9d55;
+  --blue: #2f6bff;
+  --orange: #e08a00;
+  --red: #e23b3b;
+  --gray: #8a9099;
+  --code-bg: #f3f4f6;
+  --row-hover: #eef3ff;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 工具栏 ---------- */
+.toolbar, .subbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.subbar { gap: 10px; }
+.brand { font-weight: 700; font-size: 15px; margin-right: 6px; white-space: nowrap; }
+.field { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+.field > span { white-space: nowrap; }
+
+.input, .select {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+}
+.input:focus, .select:focus { border-color: var(--primary); }
+.input.grow { flex: 1; min-width: 180px; }
+.input.hide { display: none; }
+
+.btn {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: #f0f2f5; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--primary-d); }
+
+.status {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.status-idle { background: #eef0f3; color: var(--muted); }
+.status-launching { background: #fff3d6; color: var(--orange); }
+.status-recording { background: #e3f6ea; color: var(--green); }
+.status-stopping { background: #fff3d6; color: var(--orange); }
+.status-error { background: #fde4e4; color: var(--red); }
+
+.check { display: flex; align-items: center; gap: 4px; color: var(--muted); cursor: pointer; }
+.stats { color: var(--muted); white-space: nowrap; margin-left: auto; }
+
+/* ---------- 主区域 ---------- */
+.main { flex: 1; display: flex; min-height: 0; }
+.tree {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 6px 40px;
+}
+.detail {
+  width: 46%;
+  min-width: 320px;
+  max-width: 720px;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  overflow: auto;
+  padding: 0;
+}
+.empty { color: var(--muted); padding: 24px; text-align: center; }
+
+/* ---------- 树 ---------- */
+.node { user-select: none; }
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.row:hover { background: var(--row-hover); }
+.caret { width: 12px; color: var(--muted); display: inline-block; text-align: center; }
+.domain-name { font-weight: 700; }
+.host-name { color: #3a4250; }
+.path-text { color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.badge {
+  font-size: 11px;
+  color: var(--muted);
+  background: #eef0f3;
+  border-radius: 10px;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+.size { color: var(--muted); font-size: 11px; margin-left: auto; }
+
+.children { margin-left: 14px; border-left: 1px dashed var(--border); padding-left: 4px; }
+.children.hidden { display: none; }
+
+.req-row { gap: 8px; }
+.req-row.active { background: var(--row-hover); outline: 1px solid var(--primary); }
+
+/* 方法徽标 */
+.m { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; color: #fff; min-width: 42px; text-align: center; }
+.m-GET { background: var(--blue); }
+.m-POST { background: var(--green); }
+.m-PUT { background: var(--orange); }
+.m-DELETE { background: var(--red); }
+.m-PATCH { background: #8a4fff; }
+.m-HEAD, .m-OPTIONS, .m-OTHER { background: var(--gray); }
+
+/* 状态码 */
+.s { font-size: 11px; font-weight: 600; min-width: 34px; text-align: center; }
+.s-2 { color: var(--green); }
+.s-3 { color: var(--blue); }
+.s-4 { color: var(--orange); }
+.s-5 { color: var(--red); }
+.s-fail { color: var(--gray); }
+
+.t-type { font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.dur { font-size: 11px; color: var(--muted); }
+
+/* ---------- 详情 ---------- */
+.detail-head { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.detail-title { font-weight: 700; word-break: break-all; }
+.detail-meta { color: var(--muted); margin-top: 4px; font-size: 12px; }
+.detail-tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tab { padding: 5px 10px; cursor: pointer; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; color: var(--muted); }
+.tab.active { background: var(--code-bg); color: var(--text); font-weight: 600; }
+.detail-body { padding: 10px 12px; }
+.kv { width: 100%; border-collapse: collapse; font-size: 12px; }
+.kv td { padding: 3px 6px; border-bottom: 1px solid var(--border); vertical-align: top; word-break: break-all; }
+.kv td.k { color: var(--muted); white-space: nowrap; width: 1%; }
+pre.code {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  overflow: auto;
+  max-height: 60vh;
+  font-family: "SF Mono", Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.note { color: var(--muted); padding: 8px 0; }
+
+/* ---------- 脱敏规则面板 ---------- */
+.hide { display: none !important; }
+.btn-mini { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--text); cursor: pointer; }
+.btn-mini:hover { background: #f0f2f5; }
+.mask-panel {
+  position: absolute; top: 46px; right: 12px; z-index: 50;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.12); padding: 12px; width: 240px;
+}
+.mask-title { font-weight: 700; margin-bottom: 8px; }
+.mask-subtitle { font-size: 12px; color: var(--text); margin-bottom: 6px; font-weight: 600; }
+.mask-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.mask-row input { flex: 1; height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; }
+.mask-hint { color: var(--muted); font-size: 11px; margin-bottom: 8px; line-height: 1.4; }
+.mask-divider { border-top: 1px dashed var(--border); margin: 4px 0 10px; }
+.mask-section { margin-bottom: 4px; }
+.mask-btn-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.mask-section .status { display: inline-block; margin-bottom: 2px; }
+
+/* ---------- 导出 / Mock 弹窗 ---------- */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.35);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.22);
+  width: 380px; max-width: 92vw; max-height: 88vh; overflow: auto; padding-bottom: 14px;
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+}
+.modal-title { font-weight: 700; font-size: 14px; }
+.modal-close { border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: var(--muted); padding: 0 4px; }
+.modal-close:hover { color: var(--text); }
+.modal-section { padding: 12px 14px; }
+.modal-subtitle { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.modal-divider { border-top: 1px dashed var(--border); margin: 2px 0; }
+.radio-row { display: flex; gap: 16px; margin-bottom: 12px; }
+.radio { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.modal-btn-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.modal-mock-status { margin-left: 0; display: inline-block; margin-bottom: 2px; }

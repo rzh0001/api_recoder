@@ -1,0 +1,7 @@
+DrissionPage>=4.1
+flask>=3.0
+flask-sock>=0.7
+websocket-client>=1.6
+tldextract>=5.0
+pywebview>=5.0
+requests>=2.28

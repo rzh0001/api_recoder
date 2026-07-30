@@ -1,0 +1,11 @@
+# 运行期产物
+runtime/
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+# 用户数据 / 已录制的导出文件
+*.har
+*.json
+!requirements.txt
