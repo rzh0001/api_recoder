@@ -1,11 +1,34 @@
-# 运行期产物
+# 运行期产物（打包时随附的浏览器 / WebView2 运行时）
 runtime/
 __pycache__/
 *.pyc
+
+# 依赖 / 虚拟环境
 .venv/
 venv/
 env/
+*.egg-info/
+
+# 构建产物（PyInstaller --onedir）
+dist/
+build/
+
 # 用户数据 / 已录制的导出文件
 *.har
 *.json
 !requirements.txt
+
+# 日志（运行时重定向输出）
+*.log
+
+# 测试 / 类型检查缓存
+.pytest_cache/
+.mypy_cache/
+
+# 编辑器 / 系统冗余文件
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
