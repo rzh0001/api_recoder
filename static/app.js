@@ -21,8 +21,8 @@ function base64FromArrayBuffer(buf) {
 }
 const treeEl = $("tree");
 const detailEl = $("detail");
-const statusEl = $("status");
-const statsEl = $("stats");
+const statusEl = $("sbApiStatus");   // 顶部/底部状态栏的 API 录制状态
+const statsEl = $("sbApiStats");
 
 const startBtn = $("startBtn");
 const stopBtn = $("stopBtn");
@@ -44,6 +44,8 @@ let ws = null;
 let renderTimer = null;
 let activeSeq = null;
 let currentDetail = null;
+let recordingActive = false;  // 是否正在录制（互斥用）
+let mockRunning = false;      // Mock 是否运行中（冻结录制库用）
 
 // ---------------- 工具 ----------------
 function esc(x) {
@@ -145,13 +147,31 @@ function updateStatus(info) {
   };
   const [text, cls] = map[info.status] || ["空闲", "status-idle"];
   statusEl.textContent = text;
-  statusEl.className = "status " + cls;
   const running = info.status === "recording" || info.status === "launching";
-  startBtn.disabled = running;
+  recordingActive = running;
   stopBtn.disabled = !running;
+  statusEl.className = "sb-status " + cls;
   if (info.status === "error" && info.error) {
     statusEl.title = info.error;
   }
+  applyLocks();
+}
+
+// ---------------- 互斥 / 冻结控制 ----------------
+// 模型 A（快照 + 互斥）：Mock 运行时冻结录制库（禁用 开始录制/导入/清空），
+// 避免启动后的快照与录制库悄悄不一致；录制中禁用 启动 Mock（两者不能共存）。
+// 后端 /api/start、/api/mock/start 也有守卫，这里只做前端防手滑 + tooltip 提示。
+function applyLocks() {
+  const lockStore = mockRunning;
+  startBtn.disabled = lockStore || recordingActive;
+  importBtn.disabled = lockStore;
+  clearBtn.disabled = lockStore;
+  startMockBtn.disabled = recordingActive || mockRunning;
+  const tip = lockStore ? "Mock 运行中，录制库已锁定；停止 Mock 后可编辑" : "";
+  startBtn.title = tip;
+  importBtn.title = tip;
+  clearBtn.title = tip;
+  startMockBtn.title = recordingActive ? "录制进行中，请先停止录制再启动 Mock" : "";
 }
 
 function updateStats(visible) {
@@ -165,22 +185,140 @@ function updateStats(visible) {
 // ---------------- Mock 服务状态 ----------------
 const startMockBtn = $("startMock");
 const stopMockBtn = $("stopMock");
-const mockStatusEl = $("mockStatus");
+const mockSbStatus = $("sbMockStatus");   // 底部状态栏的 Mock 状态
+const mockSbStatsEl = $("sbMockStats");   // 底部状态栏的 Mock 统计（接口数）
+const mockRefreshBtn = $("mockRefreshBtn");
+let mockUrl = "";
 
 function updateMockUI(info) {
   if (!info) return;
+  mockRunning = !!info.running;
   if (info.running) {
-    startMockBtn.disabled = true;
     stopMockBtn.disabled = false;
-    mockStatusEl.innerHTML = `Mock 运行中：<a href="${esc(info.url)}" target="_blank" rel="noopener">${esc(info.url)}</a> · ${info.count} 个接口`;
-    mockStatusEl.className = "status status-recording";
+    mockRefreshBtn.disabled = false;
+    mockUrl = info.url || "";
+    // 底部状态栏同步（绿灯 + 端口，方便被测程序对接）
+    mockSbStatus.textContent = info.port ? `Mock 运行中 :${info.port}` : "Mock 运行中";
+    mockSbStatus.className = "sb-status status-recording";
+    mockSbStatsEl.textContent = `接口 ${info.count}`;
+    loadMockApis();   // 同步刷新 Mock 列表（在 Mock tab 内联展示）
   } else {
-    startMockBtn.disabled = false;
     stopMockBtn.disabled = true;
-    mockStatusEl.textContent = "Mock 未启动";
-    mockStatusEl.className = "status status-idle";
+    mockRefreshBtn.disabled = false;
+    mockUrl = "";
+    mockSbStatus.textContent = "Mock 未启动";
+    mockSbStatus.className = "sb-status status-idle";
+    mockSbStatsEl.textContent = "";
+    loadMockApis();
+  }
+  applyLocks();   // 同步冻结/恢复录制库按钮
+}
+
+// ---------------- Mock 接口列表（内联在 Mock tab）+ 快速测试 ----------------
+const mockApiList = $("mockApiList");
+const mockApisUrl = $("mockApisUrl");
+const mockApisCount = $("mockApisCount");
+const mockApisSummary = $("mockApisSummary");
+
+function loadMockApis() {
+  mockApiList.innerHTML = `<div class="mock-api-empty">加载中…</div>`;
+  mockApisSummary.textContent = "";
+  return postJSON("/api/mock/apis", {}).then((res) => {
+    if (!res || !res.data) return;
+    const d = res.data;
+    mockApisUrl.textContent = d.url || "—";
+    mockApisUrl.href = d.url || "#";
+    const apis = d.apis || [];
+    window.__mockApis = apis;
+    mockApisCount.textContent = `(${apis.length})`;
+    if (!apis.length) {
+      mockApiList.innerHTML = `<div class="mock-api-empty">尚无接口（仅 XHR/FETCH 类型会被模拟）。</div>`;
+      return;
+    }
+    mockApiList.innerHTML = apis.map((a, i) =>
+      `<div class="mock-api-row" data-i="${i}">
+        <span class="method-badge m-${String(a.method || "GET").toUpperCase()}">${esc(a.method || "GET")}</span>
+        <span class="mock-api-path" title="${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}">${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}</span>
+        <span class="resp-badge">${esc(String(a.status))}</span>
+        <button class="btn btn-sm mock-test-one">测试</button>
+        <pre class="mock-api-result" style="display:none"></pre>
+      </div>`
+    ).join("");
+    // 绑定每行测试按钮
+    mockApiList.querySelectorAll(".mock-test-one").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const row = btn.closest(".mock-api-row");
+        const i = parseInt(row.getAttribute("data-i"), 10);
+        testMockApi(apis[i], row);
+      });
+    });
+  });
+}
+
+async function testMockApi(api, row) {
+  const pre = row.querySelector(".mock-api-result");
+  const btn = row.querySelector(".mock-test-one");
+  btn.disabled = true;
+  pre.style.display = "block";
+  pre.textContent = "测试中…";
+  const res = await postJSON("/api/mock/test", {
+    method: api.method, path: api.path, query: api.query,
+  });
+  btn.disabled = false;
+  if (res && res.data) {
+    const d = res.data;
+    let pretty = d.body || "";
+    if (pretty && (pretty.trim().startsWith("{") || pretty.trim().startsWith("["))) {
+      try { pretty = JSON.stringify(JSON.parse(pretty), null, 2); } catch (e) {}
+    }
+    const cls = d.ok ? (d.status < 400 ? "ok" : "err") : "err";
+    pre.className = "mock-api-result " + cls;
+    pre.textContent = `状态 ${d.status} · ${d.ms}ms\n\n${pretty}`;
+  } else {
+    pre.className = "mock-api-result err";
+    pre.textContent = "测试失败：无响应";
   }
 }
+
+async function testAllMockApis() {
+  const rows = Array.from(mockApiList.querySelectorAll(".mock-api-row"));
+  if (!rows.length) return;
+  mockApisSummary.textContent = "测试中…";
+  let pass = 0, fail = 0;
+  const results = await Promise.all(rows.map(async (row) => {
+    const i = parseInt(row.getAttribute("data-i"), 10);
+    // apis 顺序与渲染一致，用 index 取对应接口
+    const api = window.__mockApis ? window.__mockApis[i] : null;
+    if (!api) return null;
+    const res = await postJSON("/api/mock/test", {
+      method: api.method, path: api.path, query: api.query,
+    });
+    const pre = row.querySelector(".mock-api-result");
+    const btn = row.querySelector(".mock-test-one");
+    if (res && res.data) {
+      const d = res.data;
+      if (d.ok && d.status < 400) pass++; else fail++;
+      let pretty = d.body || "";
+      if (pretty && (pretty.trim().startsWith("{") || pretty.trim().startsWith("["))) {
+        try { pretty = JSON.stringify(JSON.parse(pretty), null, 2); } catch (e) {}
+      }
+      const cls = d.ok ? (d.status < 400 ? "ok" : "err") : "err";
+      pre.className = "mock-api-result " + cls;
+      pre.style.display = "block";
+      pre.textContent = `状态 ${d.status} · ${d.ms}ms\n\n${pretty}`;
+      return d.ok && d.status < 400;
+    }
+    pre.className = "mock-api-result err";
+    pre.style.display = "block";
+    pre.textContent = "测试失败：无响应";
+    fail++;
+    return false;
+  }));
+  mockApisSummary.textContent = `全部测试完成：通过 ${pass} / 失败 ${fail} / 共 ${rows.length}`;
+}
+
+mockRefreshBtn.addEventListener("click", loadMockApis);
+$("mockTestAllBtn").addEventListener("click", testAllMockApis);
 
 // ---------------- 渲染树 ----------------
 function scheduleRender() {
@@ -508,6 +646,8 @@ const maskCjkEl = $("maskCjk");
 const maskDigitEl = $("maskDigit");
 const maskAlphaEl = $("maskAlpha");
 const portInputEl = $("portInput");
+const mockPortInputEl = $("mockPortInput");
+const mockPortInput2El = $("mockPortInput2");
 const portHintEl = $("portHint");
 const MASK_KEY = "api_recorder_mask_cfg";
 
@@ -519,16 +659,20 @@ function loadMaskCfg() {
   maskAlphaEl.value = cfg.alpha != null ? cfg.alpha : "a";
 }
 function savePortCfg() {
-  // 端口：写到后端 config.json（需重启生效）
+  // 端口 / Mock 端口：写到后端 config.json（服务端口需重启生效；Mock 端口下次启动生效）
   const raw = portInputEl.value.trim();
   const port = raw === "" ? null : raw;
-  postJSON("/api/config", { port }).then((res) => {
+  const mraw = mockPortInputEl.value.trim();
+  const mock_port = mraw === "" ? null : mraw;
+  postJSON("/api/config", { port, mock_port }).then((res) => {
     if (!res.ok || !res.data || !res.data.ok) {
-      alert("端口保存失败：" + ((res.data && res.data.error) || ""));
+      alert("配置保存失败：" + ((res.data && res.data.error) || ""));
     } else {
-      alert("设置已保存。端口修改需重启本程序后生效。");
+      // 同步回填 Mock 页输入框，避免两处不一致
+      if (mock_port) mockPortInput2El.value = mock_port;
+      alert("设置已保存。服务端口修改需重启本程序后生效；Mock 端口下次启动生效。");
     }
-  }).catch((e) => alert("端口保存失败：" + e));
+  }).catch((e) => alert("配置保存失败：" + e));
   $("maskPanel").classList.add("hide");
 }
 // 脱敏规则：输入即存 localStorage（配置面板不放脱敏，导出弹窗里改即持久化）
@@ -544,6 +688,10 @@ loadMaskCfg();
 // 读取已保存端口（若有）回填到输入框，并显示当前运行端口
 fetch("/api/config").then((r) => r.json()).then((d) => {
   if (d && d.saved_port) portInputEl.value = d.saved_port;
+  if (d && d.mock_port) {
+    mockPortInputEl.value = d.mock_port;
+    mockPortInput2El.value = d.mock_port;
+  }
   if (d && d.running_port) portHintEl.textContent = "当前运行端口：" + d.running_port + "；修改后需重启本程序生效。留空 = 自动选择。";
 }).catch(() => {});
 
@@ -638,7 +786,10 @@ importFile.addEventListener("change", () => {
 // 启动 / 停止 Mock 服务（进程内直接起，无需导出脚本）
 startMockBtn.addEventListener("click", () => {
   startMockBtn.disabled = true;
-  postJSON("/api/mock/start", {})
+  // 取 Mock 页端口输入框的值（空 = 用配置里的 mock_port，再不行随机）
+  const mraw = (mockPortInput2El.value || "").trim();
+  const mport = mraw === "" ? null : mraw;
+  postJSON("/api/mock/start", { port: mport })
     .then((res) => {
       if (res.ok && res.data.ok) {
         updateMockUI(res.data);
@@ -662,6 +813,15 @@ fetch("/api/mock/status")
   .then(updateMockUI)
   .catch(() => {});
 
+// 同样拉一次录制状态：刷新页面时若正在录制，按钮状态/互斥锁能立即正确反映
+fetch("/api/status")
+  .then((r) => r.json())
+  .then(updateStatus)
+  .catch(() => {});
+
+// 初始统计：页面加载即显示「显示 0/0 · 域 0 · — · 错误 0」，避免状态栏统计区空白
+updateStats(0);
+
 modeSel.addEventListener("change", () => {
   const isLocal = modeSel.value === "local";
   localPathEl.classList.toggle("hide", !isLocal);
@@ -679,6 +839,23 @@ function onFilter() {
 }
 [searchEl, methodFilterEl, typeFilterEl].forEach((el) => el.addEventListener("input", onFilter));
 [onlyApiEl, onlyErrorEl].forEach((el) => el.addEventListener("change", onFilter));
+
+// ---------------- Tab 切换（API 录制 / Mock 服务，互不干扰）----------------
+const panelApi = $("panelApi");
+const panelMock = $("panelMock");
+function switchTab(name) {
+  const isApi = name === "api";
+  panelApi.classList.toggle("hide", !isApi);
+  panelMock.classList.toggle("hide", isApi);
+  document.querySelectorAll(".tab-switch").forEach((b) =>
+    b.classList.toggle("active", b.getAttribute("data-tab") === name)
+  );
+  // Mock tab 打开时刷新接口列表（内联展示，无需弹窗）
+  if (!isApi) loadMockApis();
+}
+document.querySelectorAll(".tab-switch").forEach((b) => {
+  b.addEventListener("click", () => switchTab(b.getAttribute("data-tab")));
+});
 
 // ---------------- 启动 ----------------
 connect();

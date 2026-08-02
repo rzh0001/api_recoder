@@ -27,7 +27,7 @@ body {
 }
 
 /* ---------- 工具栏 ---------- */
-.toolbar, .subbar {
+.toolbar, .subbar, .api-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -35,8 +35,40 @@ body {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
+  position: relative;
 }
-.subbar { gap: 10px; }
+.subbar { gap: 12px; align-items: stretch; }
+
+/* 功能区分区：API 录制 / Mock 服务 各自独立成框，避免挤在一起 */
+.zone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+.zone-api { flex: 1 1 480px; min-width: 0; }
+.zone-mock {
+  flex: 0 0 auto;
+  margin-left: auto;
+  border-color: rgba(224, 138, 0, .45);
+  background: #fffaf0;
+}
+.zone .status { margin-left: 0; }
+.zone-tag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  color: #fff;
+  white-space: nowrap;
+}
+.tag-api { background: var(--blue); }
+.tag-mock { background: var(--orange); }
 .brand { font-weight: 700; font-size: 15px; margin-right: 6px; white-space: nowrap; }
 .field { display: flex; align-items: center; gap: 4px; color: var(--muted); }
 .field > span { white-space: nowrap; }
@@ -53,6 +85,8 @@ body {
 .input:focus, .select:focus { border-color: var(--primary); }
 .input.grow { flex: 1; min-width: 180px; }
 .input.hide { display: none; }
+.input-sm { width: 72px; height: 28px; padding: 0 6px; }
+.mock-port { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 
 .btn {
   height: 30px;
@@ -76,6 +110,40 @@ body {
   font-weight: 600;
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* 红绿灯式状态指示灯：圆点颜色跟随状态类（idle 灰 / recording 绿 / launching 橙 / error 红） */
+.status::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  vertical-align: middle;
+}
+
+/* 头部状态组：API 录制状态 + Mock 状态并排，用分隔线与彩色标签区分 */
+.status-group {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sg-item { display: flex; align-items: center; gap: 6px; }
+.sg-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #fff;
+}
+.sg-sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
+.status-group .status {
+  margin-left: 0;
 }
 .status-idle { background: #eef0f3; color: var(--muted); }
 .status-launching { background: #fff3d6; color: var(--orange); }
@@ -187,7 +255,7 @@ pre.code {
 .btn-mini { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--text); cursor: pointer; }
 .btn-mini:hover { background: #f0f2f5; }
 .mask-panel {
-  position: absolute; top: 46px; right: 12px; z-index: 50;
+  position: absolute; top: 100%; right: 12px; margin-top: 6px; z-index: 50;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 6px 20px rgba(0,0,0,.12); padding: 12px; width: 240px;
 }
@@ -226,3 +294,101 @@ pre.code {
 .radio { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .modal-btn-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .modal-mock-status { margin-left: 0; display: inline-block; margin-bottom: 2px; }
+.modal-wide { width: 620px; max-width: 94vw; }
+
+/* ---- Mock 接口列表 / 快速测试 ---- */
+.muted { color: var(--muted); font-weight: 400; }
+.mock-apis-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.mock-apis-url { font-size: 12px; color: var(--muted); }
+.mock-apis-url a { color: var(--primary); text-decoration: none; word-break: break-all; }
+.mock-apis-url a:hover { text-decoration: underline; }
+.mock-api-list { max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.mock-api-empty { padding: 16px; color: var(--muted); text-align: center; }
+.mock-api-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.mock-api-row:last-child { border-bottom: none; }
+.mock-api-path { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.method-badge {
+  font-size: 11px; font-weight: 700; text-align: center; border-radius: 4px; padding: 2px 0; color: #fff;
+}
+.m-GET { background: #1f9d55; }
+.m-POST { background: #2f6bff; }
+.m-PUT { background: #e08a00; }
+.m-DELETE { background: #e23b3b; }
+.m-PATCH { background: #8b5cf6; }
+.m-HEAD, .m-OPTIONS { background: #8a9099; }
+.resp-badge {
+  font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px;
+  background: #eef0f3; color: var(--muted);
+}
+.btn-sm { padding: 3px 10px; font-size: 12px; }
+.mock-api-result {
+  grid-column: 1 / -1;
+  margin: 4px 0 2px; padding: 8px;
+  background: var(--code-bg); border-radius: 6px;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto;
+}
+.mock-api-result.ok { border-left: 3px solid var(--green); }
+.mock-api-result.err { border-left: 3px solid var(--red); }
+.mock-apis-summary { margin-top: 10px; font-size: 12px; color: var(--muted); }
+
+/* ---------- 顶部 Tab 切换（API 录制 / Mock 服务）---------- */
+.spacer { flex: 1 1 auto; }
+.tabs { display: flex; gap: 2px; margin-left: 4px; }
+.tab-switch {
+  height: 30px; padding: 0 14px; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--border); background: #fff; color: var(--muted);
+  border-radius: 6px; font-size: 13px; font-weight: 600;
+}
+.tab-switch:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.tab-switch:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.tab-switch + .tab-switch { margin-left: -1px; }
+.tab-switch:hover { background: #f0f2f5; }
+.tab-switch.active {
+  background: var(--primary); border-color: var(--primary); color: #fff;
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+/* ---------- Tab 内容面板：各干各的，互不影响 ---------- */
+.tab-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.tab-panel.hide { display: none; }
+
+/* ---------- 底部状态栏 ---------- */
+.statusbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 5px 14px; background: var(--panel);
+  border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--muted);
+  flex: 0 0 auto;
+}
+.sb-item { display: flex; align-items: center; gap: 4px; }
+.sb-group { display: flex; align-items: center; gap: 8px; }
+.sb-sep { width: 1px; height: 14px; background: var(--border); }
+.sb-spacer { flex: 1 1 auto; }
+.sb-muted { color: var(--muted); }
+/* 底部状态栏统计文字（API 归 API 组、Mock 归 Mock 组） */
+.sb-stats { color: var(--muted); white-space: nowrap; }
+
+/* 状态栏指示灯：圆点 + 文字，颜色随状态类（与 .status 同色系） */
+.sb-status { display: inline-flex; align-items: center; font-weight: 600; color: var(--muted); }
+.sb-status::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px;
+  border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor;
+}
+.sb-status.status-idle { color: var(--muted); }
+.sb-status.status-launching { color: var(--orange); }
+.sb-status.status-recording { color: var(--green); }
+.sb-status.status-stopping { color: var(--orange); }
+.sb-status.status-error { color: var(--red); }
+
+/* ---------- Mock tab 内联看板 ---------- */
+.mock-dash { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 12px; gap: 10px; }
+.mock-dash-head { display: flex; align-items: center; gap: 12px; }
+.mock-api-list { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 8px; min-height: 0; }

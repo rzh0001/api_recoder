@@ -7,103 +7,147 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
+  <!-- ============ 顶部：品牌 + Tab 切换 + 设置（不含任何功能按钮）============ -->
   <header class="toolbar">
     <div class="brand">🍶 API Recorder</div>
 
-    <label class="field">
-      <span>内核</span>
-      <select id="mode">
-        <option value="builtin">自带 Chromium</option>
-        <option value="local">本机浏览器</option>
-      </select>
-    </label>
+    <!-- 顶部 Tab 切换：API 录制 / Mock 服务 互不干扰 -->
+    <div class="tabs">
+      <button class="tab-switch active" data-tab="api">📡 API 录制</button>
+      <button class="tab-switch" data-tab="mock">🧪 Mock 服务</button>
+    </div>
 
-    <label class="field hide" id="localBrowserField">
-      <span>浏览器</span>
-      <select id="localBrowser">
-        <option value="auto">自动探测</option>
-        <option value="chrome">Chrome</option>
-        <option value="edge">Edge</option>
-      </select>
-    </label>
+    <div class="spacer"></div>
 
-    <input id="localPath" class="input hide" placeholder="本机 Chrome/Edge 路径（可选，留空则按上面选择）" />
-
-    <label class="field">
-      <span>起始 URL</span>
-      <input id="startUrl" class="input" placeholder="about:blank" />
-    </label>
-
-    <button id="startBtn" class="btn btn-primary">● 开始录制</button>
-    <button id="stopBtn" class="btn" disabled>■ 停止</button>
-    <button id="clearBtn" class="btn">清空</button>
-    <button id="exportBtn" class="btn btn-primary">📤 导出</button>
+    <!-- 设置按钮靠最右 -->
     <button id="maskSettingsBtn" class="btn-mini" title="配置（Mock 服务 / 端口）">⚙</button>
     <div id="maskPanel" class="mask-panel hide">
       <div class="mask-title">配置</div>
 
       <div class="mask-section">
-        <div class="mask-subtitle">Mock 服务（点按钮直接起，无需导出脚本）</div>
-        <span id="mockStatus" class="status status-idle">Mock 未启动</span>
-        <div class="mask-btn-row">
-          <button id="startMock" class="btn btn-primary">▶ 启动 Mock 服务</button>
-          <button id="stopMock" class="btn" disabled>■ 停止 Mock</button>
-        </div>
-      </div>
-
-      <div class="mask-divider"></div>
-
-      <div class="mask-section">
-        <div class="mask-subtitle">服务端口（重启生效）</div>
-        <label class="mask-row">端口 <input id="portInput" class="input" maxlength="6" placeholder="自动" /></label>
-        <div class="mask-hint" id="portHint">端口为程序启动时绑定，修改后需重启本程序。留空 = 自动选择空闲端口。</div>
+        <div class="mask-subtitle">端口</div>
+        <label class="mask-row">服务端口 <input id="portInput" class="input" maxlength="6" placeholder="自动" /></label>
+        <label class="mask-row">Mock 端口 <input id="mockPortInput" class="input" maxlength="6" placeholder="自动" /></label>
+        <div class="mask-hint" id="portHint">服务端口为程序启动时绑定，修改后需重启本程序。Mock 端口为独立端口，供被测程序对接；留空 = 每次随机分配空闲端口。</div>
         <button id="maskSave" class="btn-mini">保存</button>
       </div>
     </div>
-    <button id="importBtn" class="btn">导入</button>
-    <input id="importFile" type="file" accept=".har,.json,application/json" class="hide" />
-
-    <span id="status" class="status status-idle">空闲</span>
   </header>
 
-  <section class="subbar">
-    <input id="search" class="input grow" placeholder="搜索 URL / 域名 / 方法 …" />
-    <select id="methodFilter" class="select">
-      <option value="all">所有方法</option>
-      <option value="GET">GET</option>
-      <option value="POST">POST</option>
-      <option value="PUT">PUT</option>
-      <option value="DELETE">DELETE</option>
-      <option value="PATCH">PATCH</option>
-      <option value="HEAD">HEAD</option>
-      <option value="OPTIONS">OPTIONS</option>
-    </select>
-    <select id="typeFilter" class="select">
-      <option value="all">所有类型</option>
-      <option value="XHR">XHR</option>
-      <option value="FETCH">Fetch</option>
-      <option value="DOCUMENT">Document</option>
-      <option value="SCRIPT">Script</option>
-      <option value="STYLESHEET">Stylesheet</option>
-      <option value="IMAGE">Image</option>
-      <option value="FONT">Font</option>
-      <option value="MEDIA">Media</option>
-      <option value="WEBSOCKET">WebSocket</option>
-      <option value="OTHER">Other</option>
-    </select>
-    <label class="check"><input type="checkbox" id="onlyApi" /> 仅 API</label>
-    <label class="check"><input type="checkbox" id="onlyError" /> 仅错误</label>
-    <span id="stats" class="stats"></span>
+  <!-- ============ API 录制 Tab（按钮都在本页，不干扰 Mock）============ -->
+  <section class="tab-panel" id="panelApi">
+    <!-- 录制控制条：本页专属 -->
+    <div class="api-toolbar">
+      <label class="field">
+        <span>内核</span>
+        <select id="mode">
+          <option value="builtin">自带 Chromium</option>
+          <option value="local">本机浏览器</option>
+        </select>
+      </label>
+
+      <label class="field hide" id="localBrowserField">
+        <span>浏览器</span>
+        <select id="localBrowser">
+          <option value="auto">自动探测</option>
+          <option value="chrome">Chrome</option>
+          <option value="edge">Edge</option>
+        </select>
+      </label>
+
+      <input id="localPath" class="input hide" placeholder="本机 Chrome/Edge 路径（可选，留空则按上面选择）" />
+
+      <label class="field">
+        <span>起始 URL</span>
+        <input id="startUrl" class="input" placeholder="about:blank" />
+      </label>
+
+      <button id="startBtn" class="btn btn-primary">● 开始录制</button>
+      <button id="stopBtn" class="btn" disabled>■ 停止</button>
+      <button id="clearBtn" class="btn">清空</button>
+      <button id="exportBtn" class="btn btn-primary">📤 导出</button>
+      <button id="importBtn" class="btn">导入</button>
+      <input id="importFile" type="file" accept=".har,.json,application/json" class="hide" />
+    </div>
+
+    <div class="subbar">
+      <input id="search" class="input grow" placeholder="搜索 URL / 域名 / 方法 …" />
+      <select id="methodFilter" class="select">
+        <option value="all">所有方法</option>
+        <option value="GET">GET</option>
+        <option value="POST">POST</option>
+        <option value="PUT">PUT</option>
+        <option value="DELETE">DELETE</option>
+        <option value="PATCH">PATCH</option>
+        <option value="HEAD">HEAD</option>
+        <option value="OPTIONS">OPTIONS</option>
+      </select>
+      <select id="typeFilter" class="select">
+        <option value="all">所有类型</option>
+        <option value="XHR">XHR</option>
+        <option value="FETCH">Fetch</option>
+        <option value="DOCUMENT">Document</option>
+        <option value="SCRIPT">Script</option>
+        <option value="STYLESHEET">Stylesheet</option>
+        <option value="IMAGE">Image</option>
+        <option value="FONT">Font</option>
+        <option value="MEDIA">Media</option>
+        <option value="WEBSOCKET">WebSocket</option>
+        <option value="OTHER">Other</option>
+      </select>
+      <label class="check"><input type="checkbox" id="onlyApi" /> 仅 API</label>
+      <label class="check"><input type="checkbox" id="onlyError" /> 仅错误</label>
+    </div>
+
+    <main class="main">
+      <div id="tree" class="tree">
+        <div class="empty">点击「开始录制」拉起浏览器，这里会按域名实时组织所有请求。</div>
+      </div>
+      <aside id="detail" class="detail">
+        <div class="empty">选择左侧任意请求查看详情。</div>
+      </aside>
+    </main>
   </section>
 
-  <main class="main">
-    <div id="tree" class="tree">
-      <div class="empty">点击「开始录制」拉起浏览器，这里会按域名实时组织所有请求。</div>
+  <!-- ============ Mock 服务 Tab ============ -->
+  <section class="tab-panel hide" id="panelMock">
+    <div class="subbar">
+      <label class="mock-port">端口 <input id="mockPortInput2" class="input input-sm" maxlength="6" placeholder="自动" /></label>
+      <button id="startMock" class="btn btn-primary">▶ 启动 Mock</button>
+      <button id="stopMock" class="btn" disabled>■ 停止 Mock</button>
+      <button id="mockRefreshBtn" class="btn">刷新列表</button>
     </div>
-    <aside id="detail" class="detail">
-      <div class="empty">选择左侧任意请求查看详情。</div>
-    </aside>
-  </main>
+
+    <main class="main">
+      <div class="mock-dash">
+        <div class="mock-dash-head">
+          <span class="mock-apis-url">Mock 地址：<a id="mockApisUrl" href="#" target="_blank" rel="noopener">—</a></span>
+          <span id="mockApisCount" class="muted">(0)</span>
+          <div class="spacer"></div>
+          <button id="mockTestAllBtn" class="btn btn-primary">全部测试</button>
+        </div>
+        <div id="mockApiList" class="mock-api-list">
+          <div class="mock-api-empty">尚未启动 Mock 或无接口。</div>
+        </div>
+        <div class="mock-apis-summary" id="mockApisSummary"></div>
+      </div>
+    </main>
+  </section>
+
+  <!-- ============ 底部状态栏：API 归 API，Mock 归 Mock ============ -->
+  <footer class="statusbar">
+    <span class="sb-group">
+      <span class="sb-status status-idle" id="sbApiStatus">空闲</span>
+      <span id="sbApiStats" class="sb-stats"></span>
+    </span>
+    <span class="sb-sep"></span>
+    <span class="sb-group">
+      <span class="sb-status status-idle" id="sbMockStatus">Mock 未启动</span>
+      <span id="sbMockStats" class="sb-stats"></span>
+    </span>
+    <span class="sb-spacer"></span>
+    <span class="sb-item sb-muted" id="sbInfo">就绪</span>
+  </footer>
 
   <!-- 导出弹窗（含格式选择与脱敏配置） -->
   <div id="exportModal" class="modal-mask hide">

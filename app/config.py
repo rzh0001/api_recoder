@@ -62,6 +62,18 @@ else:
 # 自动选端口时的候选顺序（靠前的优先；末尾的 0 表示交给系统分配一个完全空闲的端口）。
 PORT_CANDIDATES = [6789, 6790, 8080, 8888, 8000, 5000, 9000, 5001, 7777, 0]
 
+# Mock 服务端口：独立端口（与被测程序对接用）。
+# 优先级：环境变量 API_RECORDER_MOCK_PORT > config.json 的 mock_port > None(每次随机分配)。
+_MOCK_PORT_ENV = os.environ.get("API_RECORDER_MOCK_PORT")
+if _MOCK_PORT_ENV:
+    try:
+        MOCK_PORT = int(_MOCK_PORT_ENV)
+    except ValueError:
+        MOCK_PORT = None
+else:
+    _cfg_mock_port = USER_CONFIG.get("mock_port")
+    MOCK_PORT = int(_cfg_mock_port) if isinstance(_cfg_mock_port, int) else None
+
 # 浏览器内核模式：builtin(自带 Chromium) / local(本机已装 Chrome/Edge)
 DEFAULT_BROWSER_MODE = os.environ.get("API_RECORDER_BROWSER_MODE", "builtin")
 # 本机浏览器显式路径（local 模式优先使用）；为空则自动探测

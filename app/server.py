@@ -4,6 +4,9 @@ import json
 import mimetypes
 import os
 import socket as _socket
+import time as _time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -11,7 +14,7 @@ from flask import Flask, Response, request, send_file, send_from_directory
 from flask_sock import Sock
 
 from . import state
-from .config import HOST, PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG
+from .config import HOST, PORT, MOCK_PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG
 
 
 def resolve_port(preferred=None):
@@ -68,6 +71,12 @@ def api_start():
     local_path = data.get("local_path") or None
     browser = data.get("browser") or None
     start_url = data.get("start_url") or "about:blank"
+    # 互斥守卫：Mock 运行中不允许再开始录制（快照模型下两者不能共存）
+    if state.mock_manager.running:
+        return json.dumps(
+            {"ok": False, "error": "请先停止 Mock 服务，再开始录制（录制与 Mock 不能同时进行）"},
+            ensure_ascii=False,
+        ), 400
     try:
         info = state.browser_manager.launch(
             mode=mode, local_path=local_path, start_url=start_url, browser=browser
@@ -180,6 +189,7 @@ def api_get_config():
     return json.dumps(
         {
             "saved_port": USER_CONFIG.get("port"),
+            "mock_port": USER_CONFIG.get("mock_port"),
             "running_port": request.host.split(":")[1] if ":" in request.host else "80",
             "browser_options": ["auto", "chrome", "edge"],
         },
@@ -198,7 +208,15 @@ def api_set_config():
                 raise ValueError("端口范围 1-65535")
         except (TypeError, ValueError) as e:
             return json.dumps({"ok": False, "error": f"端口无效：{e}"}, ensure_ascii=False), 400
-    # 读取现有配置并覆写 port 字段，避免丢失其他键
+    mock_port = data.get("mock_port")
+    if mock_port is not None:
+        try:
+            mock_port = int(mock_port)
+            if not (1 <= mock_port <= 65535):
+                raise ValueError("端口范围 1-65535")
+        except (TypeError, ValueError) as e:
+            return json.dumps({"ok": False, "error": f"Mock 端口无效：{e}"}, ensure_ascii=False), 400
+    # 读取现有配置并覆写字段，避免丢失其他键
     cfg = {}
     try:
         if CONFIG_FILE.exists():
@@ -210,6 +228,10 @@ def api_set_config():
         cfg.pop("port", None)
     else:
         cfg["port"] = port
+    if mock_port is None:
+        cfg.pop("mock_port", None)
+    else:
+        cfg["mock_port"] = mock_port
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -350,6 +372,15 @@ def api_export_mock():
 @app.post("/api/mock/start")
 def api_mock_start():
     data = request.get_json(silent=True) or {}
+    # 互斥守卫：正在录制时不允许启动 Mock（快照模型下两者不能共存）
+    if state.browser_manager._running:
+        return Response(
+            json.dumps(
+                {"ok": False, "error": "请先停止录制，再启动 Mock（录制与 Mock 不能同时进行）"},
+                ensure_ascii=False,
+            ),
+            status=400, mimetype="application/json",
+        )
     port = data.get("port")
     if port is not None:
         try:
@@ -359,8 +390,14 @@ def api_mock_start():
                 json.dumps({"ok": False, "error": "端口无效"}, ensure_ascii=False),
                 status=400, mimetype="application/json",
             )
+    else:
+        # 前端未指定端口时，回退到配置里的 mock_port（再不行由 MockManager 随机分配）。
+        port = MOCK_PORT
     res = state.mock_manager.start(port)
     if res.get("ok"):
+        # 与 status()/stop 返回格式保持统一，带上 running 字段，
+        # 否则前端 updateMockUI 靠 info.running 判断会误判为未启动。
+        res["running"] = True
         state.broadcast(
             json.dumps({"type": "mock", "status": state.mock_manager.status()}, ensure_ascii=False)
         )
@@ -385,6 +422,76 @@ def api_mock_status():
     return Response(
         json.dumps(state.mock_manager.status(), ensure_ascii=False), mimetype="application/json"
     )
+
+
+@app.route("/api/mock/apis", methods=["GET", "POST"])
+def api_mock_apis():
+    """返回正在模拟的接口清单（供前端展示列表）。"""
+    m = state.mock_manager
+    return Response(
+        json.dumps(
+            {"running": m.running, "url": m._url(), "apis": m.apis()},
+            ensure_ascii=False,
+        ),
+        mimetype="application/json",
+    )
+
+
+@app.post("/api/mock/test")
+def api_mock_test():
+    """快速测试某条 mock 接口：由主服务代理请求到 mock 端口，避开跨域(CORS)。
+
+    请求体：{"method": "GET", "path": "/v1/x", "query": "a=1"}
+    返回：{"ok": true, "status": 200, "ms": 12, "body": "..."} 或错误。
+    """
+    m = state.mock_manager
+    if not m.running:
+        return Response(
+            json.dumps({"ok": False, "error": "Mock 未运行"}, ensure_ascii=False),
+            status=400, mimetype="application/json",
+        )
+    data = request.get_json(silent=True) or {}
+    method = (data.get("method") or "GET").upper()
+    path = data.get("path") or "/"
+    query = data.get("query") or ""
+    base = (m._url() or "").rstrip("/")
+    url = base + path
+    if query:
+        url += "?" + query
+    t0 = _time.time()
+    try:
+        req = urllib.request.Request(url, method=method)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = resp.read().decode("utf-8", "replace")
+            code = resp.getcode()
+        ms = int((_time.time() - t0) * 1000)
+        return Response(
+            json.dumps(
+                {"ok": True, "status": code, "ms": ms, "body": body[:3000]},
+                ensure_ascii=False,
+            ),
+            mimetype="application/json",
+        )
+    except urllib.error.HTTPError as e:
+        # 404 等也是"正常响应"，如实返回状态码
+        try:
+            body = e.read().decode("utf-8", "replace")
+        except Exception:
+            body = ""
+        ms = int((_time.time() - t0) * 1000)
+        return Response(
+            json.dumps(
+                {"ok": True, "status": e.code, "ms": ms, "body": body[:3000]},
+                ensure_ascii=False,
+            ),
+            mimetype="application/json",
+        )
+    except Exception as e:
+        ms = int((_time.time() - t0) * 1000)
+        return Response(
+            json.dumps({"ok": False, "error": str(e), "ms": ms}, ensure_ascii=False),
+            status=500, mimetype="application/json",
+        )
 
 
 @app.post("/api/import")

@@ -155,6 +155,19 @@ class MockManager:
                 "started_at": self.started_at,
             }
 
+    def apis(self):
+        """返回当前正在模拟的接口清单（给前端展示列表用）。"""
+        with self._lock:
+            return [
+                {
+                    "method": r.get("method"),
+                    "path": r.get("path") or "",
+                    "query": r.get("query") or "",
+                    "status": (r.get("response") or {}).get("status", 200),
+                }
+                for r in self.data
+            ]
+
     def _url(self):
         if self.port is None:
             return None
