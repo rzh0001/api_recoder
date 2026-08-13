@@ -11,13 +11,12 @@ import json
 import os
 import socket
 import sys
-import subprocess
 import threading
 import time
 import webbrowser
 
 from app import state
-from app.config import HOST, PORT, WEBVIEW2_RUNTIME_DIR, VCREDIST_EXE, RUNTIME_DIR
+from app.config import HOST, PORT, RUNTIME_DIR
 from app.server import app, resolve_port
 
 
@@ -27,44 +26,6 @@ def _warn_box(msg):
         ctypes.windll.user32.MessageBoxW(0, str(msg), "API Recorder", 0x30)
     except Exception:
         print(msg)
-
-
-def configure_packaged_runtime():
-    """打包版启动时的运行时初始化（开发期这些路径通常不存在，自动跳过）。
-
-    - 若有随包的 WebView2 109 固定运行时，设置 WEBVIEW2_BROWSER_EXECUTABLE_FOLDER，
-      让控制面板窗口在 Win7 上也能用 WebView2（>109 在 Win7 起不来）。
-    - 若随包附带了 vc_redist.x64.exe 且尚未安装，则首次静默安装（Win7 缺 UCRT 会起不来）。
-    """
-    if WEBVIEW2_RUNTIME_DIR.exists():
-        os.environ["WEBVIEW2_BROWSER_EXECUTABLE_FOLDER"] = str(WEBVIEW2_RUNTIME_DIR)
-    if VCREDIST_EXE and VCREDIST_EXE.exists():
-        marker = RUNTIME_DIR / ".vcredist_installed"
-        # 注意：UCRT 缺失时本进程可能根本无法启动到此处；包内已额外附带 ucrtbase.dll
-        # 与 api-ms-win-crt-*.dll 以保证冷启动。这里负责把完整的 VC++ 运行库装到系统，
-        # 以便 WebView2 等独立进程也能用到。
-        if not marker.exists():
-            try:
-                r = subprocess.run(
-                    [str(VCREDIST_EXE), "/quiet", "/norestart"],
-                    capture_output=True, text=True, timeout=420,
-                )
-                if r.returncode in (0, 3010):
-                    try:
-                        marker.write_text("ok", encoding="utf-8")
-                    except Exception:
-                        pass
-                else:
-                    _warn_box(
-                        "API Recorder 需要 Visual C++ 运行库才能运行。\n"
-                        "自动安装未完成（返回码 %s，可能缺少系统补丁 KB2999226/KB3118401）。\n"
-                        "请手动运行包内的 vc_redist.x64.exe 后重试。" % r.returncode
-                    )
-            except Exception as e:
-                _warn_box(
-                    "API Recorder 需要 Visual C++ 运行库。\n自动安装失败：%s\n"
-                    "请手动运行包内的 vc_redist.x64.exe。" % e
-                )
 
 
 def wait_for_port(port, host="127.0.0.1", timeout=15):
@@ -96,7 +57,6 @@ def _redirect_logs():
 
 
 def main():
-    configure_packaged_runtime()
     _redirect_logs()
     actual_port = resolve_port(PORT)
     print(f"* API Recorder 本地服务将启动于 http://{HOST}:{actual_port}/")

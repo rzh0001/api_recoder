@@ -21,9 +21,7 @@ STATIC_DIR = BASE_DIR / "static"                  # 冻结后由 PyInstaller 把
 CONFIG_FILE = RUNTIME_DIR / "config.json"         # 用户持久化配置（端口等）
 
 # 随包捆绑、与 exe 同目录的运行时资源（仅打包版使用，开发期这些路径多半不存在）
-WEBVIEW2_RUNTIME_DIR = APP_DIR / "WebView2Runtime"   # WebView2 109 固定运行时（Win7 兼容）
-BUNDLED_CHROME = APP_DIR / "Chrome" / "chrome.exe"  # 随包捆绑的 Chrome 109（Win7 抓包用）
-VCREDIST_EXE = APP_DIR / "vc_redist_win7.x64.exe"   # VC++ 2015-2019（Win7 兼容，内含 UCRT）
+BUNDLED_CHROME = APP_DIR / "Chrome" / "chrome.exe"  # 随包捆绑的 Chrome（可选；不存在则回退系统浏览器）
 
 for _d in (RUNTIME_DIR, CHROMIUM_DIR, USER_DATA_DIR, STATIC_DIR):
     try:

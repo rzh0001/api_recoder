@@ -111,8 +111,8 @@ class BrowserManager:
             co.set_argument("--no-default-browser-check")
             co.set_argument("--start-maximized")
             co.set_argument("--disable-infobars")
-            # 随包捆绑的 Chrome 109 没有 Google Update 服务，且 Win7 上也无新版本可更新；
-            # 显式关掉后台联网与组件更新，避免无谓的网络尝试与控制台噪音。
+            # 随包 Chrome 无 Google Update 服务，显式关掉后台联网与组件更新，
+            # 避免无谓的网络尝试与控制台噪音。
             co.set_argument("--disable-background-networking")
             co.set_argument("--disable-component-update")
             co.set_argument("--disable-features=Translate,OptimizationHints,MediaRouter")
@@ -321,8 +321,8 @@ class BrowserManager:
         """探测本机浏览器路径。
 
         browser: None/"auto" 同时探测 Chrome 与 Edge；"chrome" 仅 Chrome；"edge" 仅 Edge。
-        优先级：DEFAULT_LOCAL_BROWSER(env) > 随包捆绑的 Chrome 109（仅非 edge 时）> 系统注册表/常见路径。
-        随包捆绑的 Chrome 109 是 Win7 上能跑的最后一个 Chrome 版本，优先用于抓包。
+        优先级：DEFAULT_LOCAL_BROWSER(env) > 随包捆绑的 Chrome（仅非 edge 时）> 系统注册表/常见路径。
+        随包捆绑的 Chrome 优先用于抓包（不存在时回退系统浏览器）。
         """
         if DEFAULT_LOCAL_BROWSER and os.path.exists(DEFAULT_LOCAL_BROWSER):
             return DEFAULT_LOCAL_BROWSER

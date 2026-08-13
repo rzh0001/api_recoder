@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""用 Python 3.8 的 PyInstaller 把 API Recorder 冻结为 Windows 文件夹形态。
+"""用 PyInstaller 把 API Recorder 冻结为 Windows 文件夹形态（onedir）。
 
-必须在 Python 3.8 环境下运行（3.9+ 无法在 Win7 运行）。
 用法：
-    C:\api_recorder_build\python38\python.exe packaging\build.py
+    python packaging/build.py
 """
 import os
 import sys

@@ -25,7 +25,7 @@ body {
   display: flex;
   flex-direction: column;
   /* 全局允许选中/复制（含右侧详情、左侧 API 地址/路径）。
-     适配 WebView2 109 旧内核，需带 -webkit- 前缀。 */
+     适配 WebView2（Chromium 内核），需带 -webkit- 前缀。 */
   -webkit-user-select: text;
   -moz-user-select: text;
   user-select: text;
@@ -362,7 +362,7 @@ body {
 .tab { padding: 5px 10px; cursor: pointer; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; color: var(--muted); }
 .tab.active { background: var(--code-bg); color: var(--text); font-weight: 600; }
 .detail-body { padding: 10px 12px; }
-/* WebView2 109 下 body 的 user-select 不一定继承到 pre/code/json 树，
+/* WebView2 下 body 的 user-select 不一定继承到 pre/code/json 树，
    显式声明保证详情区文本可以选中复制 */
 .detail, .detail-body, pre.code, .jtree, .jtree .jline {
   -webkit-user-select: text;

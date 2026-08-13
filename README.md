@@ -41,8 +41,6 @@ python packaging\build.py
 
 最终产物位于 `C:\api_recorder_build\dist\API_Recorder`，双击 `API_Recorder.exe` 即可运行。
 
-> `packaging/assemble.py` 仅用于旧版 Win7 场景（捆绑 WebView2 109 / Supermium / VC++ 2015-2019 等运行时），现代 Windows 无需执行。
-
 ## 自动化发布
 
 推送 `v*` 标签（如 `v1.0.0`）会触发 GitHub Actions 自动构建并发布 Release（见 `.github/workflows/release.yml`）：
@@ -63,7 +61,7 @@ git push origin v1.0.0
 | `app/` | 后端：Flask 服务、录制存储、Mock 管理 |
 | `static/` | 前端：HTML / CSS / JS 控制面板 |
 | `main.py` | 入口：pywebview 窗口 + 原生文件对话框 |
-| `packaging/` | 构建（`build.py`）脚本；`assemble.py` 仅历史 Win7 场景使用 |
+| `packaging/` | 构建脚本（`build.py`，PyInstaller 冻结为 onedir） |
 | `tests/` | 测试 |
 
 ## 已知限制
