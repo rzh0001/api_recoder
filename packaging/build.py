@@ -40,6 +40,8 @@ opts = [
     "--hidden-import", "websocket",
     # 前端静态资源打进 _MEIPASS/static（config.STATIC_DIR 指向这里）
     "--add-data", os.path.join(PROJECT, "static") + os.pathsep + "static",
+    # exe 图标（同时 static/icon.ico 随 static 打进包，供窗口图标使用）
+    "--icon", os.path.join(PROJECT, "static", "icon.ico"),
 ]
 
 if __name__ == "__main__":

@@ -200,12 +200,17 @@ def main():
                 return self._d
 
         api = RecorderApi()
+        _icon = os.path.join(
+            getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
+            "static", "icon.ico",
+        )
         window = webview.create_window(
             "API Recorder · API 录制器",
             f"http://{HOST}:{actual_port}/",
             width=1280,
             height=820,
             js_api=api,
+            icon=_icon if os.path.exists(_icon) else None,
         )
         api._bind(window)
 
