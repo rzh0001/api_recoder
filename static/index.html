@@ -66,11 +66,10 @@
       <button id="stopBtn" class="btn" disabled>■ 停止</button>
       <button id="clearBtn" class="btn">清空</button>
       <button id="exportBtn" class="btn btn-primary">📤 导出</button>
-      <button id="openBtn" class="btn" title="打开 HAR/JSON 文件，编辑（标记/注释/删除）后可一键覆盖保存">打开</button>
+      <button id="openBtn" class="btn" title="打开 HAR/JSON 文件导入（与「导入」相同，受浏览器限制不关联源文件）">打开</button>
       <button id="importBtn" class="btn">导入</button>
       <button id="saveBtn" class="btn btn-primary" title="保存当前录制（含全部标记）">保存</button>
-      <span id="sourceHint" class="source-hint"></span>
-      <input id="importFile" type="file" accept=".har,.json,application/json" multiple class="hide" />
+      <input id="importFile" type="file" accept=".har,.json,application/json" multiple class="file-input-hidden" />
     </div>
 
     <div class="subbar">

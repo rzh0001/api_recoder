@@ -4,12 +4,6 @@
 // ---------------- DOM ----------------
 const $ = (id) => document.getElementById(id);
 
-// pywebview 就绪 Promise（桌面窗口下 window.pywebview 在 pywebviewready 事件后才注入）
-window.pywebviewReady = new Promise((resolve) => {
-  if (window.pywebview) return resolve(window.pywebview);
-  window.addEventListener("pywebviewready", () => resolve(window.pywebview), { once: true });
-});
-
 function base64FromArrayBuffer(buf) {
   let binary = "";
   const bytes = new Uint8Array(buf);
@@ -1020,80 +1014,38 @@ function postJSON(url, body) {
   }).then((r) => r.json().then((d) => ({ ok: r.ok, data: d })));
 }
 
-// 统一的「保存文件」逻辑：内容经 base64 交给 Python 端弹原生保存对话框写盘，
-// 与「下载 JS」完全一致；无 pywebview API 时回退到浏览器 blob 下载。
-// 所有导出（HAR / JSON / Mock / 单文件）都走它，避免各写一套。
+// 统一的「保存文件」逻辑：浏览器原生下载（WebView2/Chromium 与 IE11 均可靠），
+// 不再依赖 pywebview 原生保存对话框（在 js_api 工作线程中静默失败，且 WebView2 后端未实现）。
+// 所有导出（HAR / JSON / Mock）与「保存」都走它，避免各写一套。
 function saveTextFile(filename, text) {
-  const b64 = btoa(unescape(encodeURIComponent(text)));
-  return window.pywebviewReady.then((pw) => {
-    if (pw && pw.api && pw.api.save_file) {
-      return pw.api.save_file(filename, b64).then((res) => {
-        if (!res || !res.ok) {
-          if (res && res.cancelled) return null;
-          throw new Error((res && res.error) || "保存失败");
-        }
-        return res.path;
-      });
-    }
-    const blob = new Blob([text], { type: "application/octet-stream" });
-    const u = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = u; a.download = filename;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(u), 1000);
-    return "已下载到默认位置";
-  });
+  const blob = new Blob([text], { type: "application/octet-stream" });
+  if (window.navigator.msSaveOrOpenBlob) {
+    window.navigator.msSaveOrOpenBlob(blob, filename);
+    return Promise.resolve("已下载到默认位置");
+  }
+  const u = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = u; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 1000);
+  return Promise.resolve("已下载到默认位置");
 }
 
-// ---------------- 打开 / 保存（编辑后可覆盖原 HAR）----------------
-// sourcePath：当前录制库关联的源文件路径（「打开」时记录，重启后从配置恢复）
-let sourcePath = "";
+// ---------------- 打开 / 保存 ----------------
+// 受浏览器安全限制，HTML <input type=file> 拿不到完整本地路径，故不再做「打开即关联源文件、
+// 保存覆盖原文件」。导入/打开统一走浏览器原生文件选择，保存/导出走浏览器原生下载。
 const openBtn = $("openBtn");
 const saveBtn = $("saveBtn");
-const sourceHint = $("sourceHint");
-
-function updateSourceHint() {
-  if (!sourceHint) return;
-  if (sourcePath) {
-    sourceHint.textContent = "📄 " + sourcePath.split(/[\\/]/).pop() + "（保存将覆盖此文件）";
-    sourceHint.title = sourcePath;
-    sourceHint.classList.add("on");
-  } else {
-    sourceHint.textContent = "";
-    sourceHint.title = "";
-    sourceHint.classList.remove("on");
-  }
-}
-
-// 页面加载时恢复最近打开的文件关联
-fetch("/api/config").then((r) => r.json()).then((d) => {
-  if (d && d.last_source_har) { sourcePath = d.last_source_har; updateSourceHint(); }
-}).catch(() => {});
 
 if (openBtn) {
+  // 「打开」与「导入」走同一套浏览器原生文件选择（可靠、跨后端一致）；
+  // 受浏览器安全限制，HTML <input type=file> 拿不到完整本地路径，故不再关联源文件做「覆盖保存」。
   openBtn.addEventListener("click", () => {
-    window.pywebviewReady.then((pw) => {
-      if (!pw || !pw.api || !pw.api.open_file) {
-        throw new Error("当前为浏览器模式，请改用「导入」按钮；桌面窗口下才能「打开」并覆盖保存。");
-      }
-      return pw.api.open_file();
-    }).then((res) => {
-      if (!res || res.cancelled) return null;
-      if (!res.ok) throw new Error(res.error || "打开失败");
-      return postJSON("/api/import_base64", {
-        name: res.name, content_b64: res.content_b64, source_path: res.path
-      }).then((r) => ({ open: res, imp: r }));
-    }).then((x) => {
-      if (!x) return;
-      const { open, imp } = x;
-      if (imp.ok && imp.data && imp.data.ok) {
-        sourcePath = open.path;
-        updateSourceHint();
-        alert(`已打开 ${open.name}：${imp.data.kind} 共 ${imp.data.count} 条。\n\n编辑（标记/注释/删除）后点「保存」可直接覆盖该文件。`);
-      } else {
-        alert("导入失败：" + ((imp.data && imp.data.error) || "未知错误"));
-      }
-    }).catch((e) => alert("打开失败：" + e.message));
+    try {
+      importFile.click();
+    } catch (e) {
+      alert("无法打开文件选择框：" + e.message);
+    }
   });
 }
 
@@ -1104,29 +1056,8 @@ if (saveBtn) {
     saveBtn.textContent = "保存中…";
     fetch("/api/export?format=har")
       .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
-      .then((text) => {
-        const b64 = btoa(unescape(encodeURIComponent(text)));
-        return window.pywebviewReady.then((pw) => {
-          if (!pw || !pw.api) throw new Error("当前为浏览器模式，无法直接写盘；请用「导出」另存。");
-          if (sourcePath && pw.api.save_to_path) {
-            return pw.api.save_to_path(sourcePath, b64).then((res) => ({ res, kind: "overwrite" }));
-          }
-          return pw.api.save_file("api-recording.har", b64).then((res) => ({ res, kind: "saveas" }));
-        });
-      })
-      .then(({ res, kind }) => {
-        if (!res) return;
-        if (res.ok) {
-          if (kind === "overwrite") {
-            alert("已保存并覆盖：" + (res.path || sourcePath));
-          } else {
-            if (res.path) { sourcePath = res.path; updateSourceHint(); }
-            alert("已另存为：" + (res.path || ""));
-          }
-        } else if (!res.cancelled) {
-          alert("保存失败：" + (res.error || "未知错误"));
-        }
-      })
+      .then((text) => saveTextFile("api-recording.har", text))
+      .then(() => alert("已保存（下载到浏览器默认下载目录，文件名 api-recording.har）"))
       .catch((e) => alert("保存失败：" + e.message))
       .finally(() => { saveBtn.disabled = false; saveBtn.textContent = oldText; });
   });
@@ -1281,35 +1212,16 @@ doExportBtn.addEventListener("click", () => {
 
 const importBtn = $("importBtn");
 const importFile = $("importFile");
+// 导入统一走浏览器原生 <input type=file>（WebView2/Chromium 与 IE11 均可靠），
+// 不再依赖 pywebview 的 create_file_dialog——它在 js_api 工作线程中调用会静默失败，
+// 且在 WebView2/edgechromium 后端根本未实现，表现即「点击导入没反应」。
 importBtn.addEventListener("click", () => {
-  window.pywebviewReady.then((pw) => {
-    if (pw && pw.api && pw.api.import_files) {
-      doNativeImport(pw);
-    } else {
-      importFile.click();
-    }
-  });
+  try {
+    importFile.click();
+  } catch (e) {
+    alert("无法打开文件选择框：" + e.message);
+  }
 });
-
-function doNativeImport(pw) {
-  pw.api.import_files()
-    .then((res) => {
-      if (!res || res.cancelled) return;
-      if (!res.ok) { alert("导入失败：" + (res.error || "未知错误")); return; }
-      const d = res.data || {};
-      if (d.ok) {
-        if (d.source_path) { sourcePath = d.source_path; updateSourceHint(); }
-        else { sourcePath = ""; updateSourceHint(); }
-        alert(
-          `导入成功：${d.kind} 共 ${d.count} 条（${d.files || 1} 个文件，左侧已刷新）` +
-          (d.source_path ? "\n\n已关联原文件，「保存」可直接覆盖写回。" : "")
-        );
-      } else {
-        alert("导入失败：" + (d.error || "未知错误"));
-      }
-    })
-    .catch((e) => alert("导入失败：" + e.message));
-}
 
 importFile.addEventListener("change", () => {
   const files = importFile.files;

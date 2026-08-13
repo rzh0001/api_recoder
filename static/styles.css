@@ -499,6 +499,18 @@ mark.hl {
 
 /* ---------- 脱敏规则面板 ---------- */
 .hide { display: none !important; }
+
+/* 隐藏的文件选择框：必须可点击（不能 display:none），否则 WebView2/Chromium 下
+   input.click() 无法唤起系统文件对话框。用绝对定位移到视口外 + 透明来实现隐藏。 */
+.file-input-hidden {
+  position: fixed;
+  top: -10000px;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
 .btn-mini { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--text); cursor: pointer; }
 .btn-mini:hover { background: #f0f2f5; }
 .mask-panel {
