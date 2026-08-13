@@ -67,7 +67,6 @@ def main():
             f"http://{HOST}:{actual_port}/",
             width=1280,
             height=820,
-            icon=_icon if os.path.exists(_icon) else None,
         )
 
         def on_closed():
@@ -77,7 +76,7 @@ def main():
                 pass
 
         window.events.closed += on_closed
-        webview.start()
+        webview.start(icon=_icon if os.path.exists(_icon) else None)
     except ImportError:
         print(
             f"未安装 pywebview，已在系统浏览器打开 http://{HOST}:{actual_port}/ "
