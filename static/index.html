@@ -66,12 +66,20 @@
       <button id="stopBtn" class="btn" disabled>■ 停止</button>
       <button id="clearBtn" class="btn">清空</button>
       <button id="exportBtn" class="btn btn-primary">📤 导出</button>
+      <button id="openBtn" class="btn" title="打开 HAR/JSON 文件，编辑（标记/注释/删除）后可一键覆盖保存">打开</button>
       <button id="importBtn" class="btn">导入</button>
-      <input id="importFile" type="file" accept=".har,.json,application/json" class="hide" />
+      <button id="saveBtn" class="btn btn-primary" title="保存当前录制（含全部标记）">保存</button>
+      <span id="sourceHint" class="source-hint"></span>
+      <input id="importFile" type="file" accept=".har,.json,application/json" multiple class="hide" />
     </div>
 
     <div class="subbar">
-      <input id="search" class="input grow" placeholder="搜索 URL / 域名 / 方法 …" />
+      <div class="search-wrap">
+        <input id="search" class="input grow search-input" placeholder="搜索：URL / 域名 / 请求体 / 响应体 …（多个值用 | 分隔表示「或」，如 123 | abc）" autocomplete="off" />
+        <button id="searchClear" class="search-clear hide" type="button" title="清空">×</button>
+        <button id="searchHistoryBtn" class="search-hist-btn" type="button" title="搜索历史">🕘</button>
+        <div id="searchHistory" class="search-history hide"></div>
+      </div>
       <select id="methodFilter" class="select">
         <option value="all">所有方法</option>
         <option value="GET">GET</option>
@@ -97,6 +105,11 @@
       </select>
       <label class="check"><input type="checkbox" id="onlyApi" /> 仅 API</label>
       <label class="check"><input type="checkbox" id="onlyError" /> 仅错误</label>
+      <label class="check"><input type="checkbox" id="ignoreHeaders" /> 忽略请求头</label>
+      <select id="sortBy" class="select" title="排序方式">
+        <option value="default">默认（按时间）</option>
+        <option value="url">按 API 地址</option>
+      </select>
     </div>
 
     <main class="main">
@@ -131,6 +144,18 @@
         </div>
         <div class="mock-apis-summary" id="mockApisSummary"></div>
       </div>
+
+      <div class="mock-logs">
+        <div class="mock-dash-head">
+          <span>处理记录</span>
+          <span id="mockLogsCount" class="muted"></span>
+          <div class="spacer"></div>
+          <button id="mockLogsRefreshBtn" class="btn">刷新</button>
+        </div>
+        <div id="mockLogList" class="mock-log-list">
+          <div class="mock-api-empty">暂无处理记录（Mock 收到请求后这里会实时显示，点击可查看详情）。</div>
+        </div>
+      </div>
     </main>
   </section>
 
@@ -148,6 +173,17 @@
     <span class="sb-spacer"></span>
     <span class="sb-item sb-muted" id="sbInfo">就绪</span>
   </footer>
+
+  <!-- Mock 处理记录详情弹窗 -->
+  <div id="mockLogModal" class="modal-mask hide">
+    <div class="modal modal-lg">
+      <div class="modal-head">
+        <span class="modal-title" id="mockLogModalTitle">处理记录详情</span>
+        <button id="mockLogModalClose" class="modal-close" title="关闭">×</button>
+      </div>
+      <div class="modal-body" id="mockLogModalBody"></div>
+    </div>
+  </div>
 
   <!-- 导出弹窗（含格式选择与脱敏配置） -->
   <div id="exportModal" class="modal-mask hide">
@@ -176,6 +212,30 @@
         <div class="mask-row">数字 → <input id="maskDigit" class="input" maxlength="8" placeholder="1" /></div>
         <div class="mask-row">英文 → <input id="maskAlpha" class="input" maxlength="8" placeholder="a" /></div>
         <div class="mask-hint">留空 = 不脱敏该类；可填多个字符。默认 测 / 1 / a。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 编辑请求弹窗（造数据：改 URL / 请求头 / 请求体） -->
+  <div id="editReqModal" class="modal-mask hide">
+    <div class="modal modal-lg">
+      <div class="modal-head">
+        <span class="modal-title" id="editReqModalTitle">编辑请求</span>
+        <button id="editReqModalClose" class="modal-close" title="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-subtitle">请求地址 URL<span class="modal-tip">（改末尾的 ID / 路径即可造不同数据）</span></div>
+        <textarea id="editReqUrl" class="edit-req-url" placeholder="http://host/path/..."></textarea>
+        <div class="modal-subtitle">请求头 Headers（JSON 对象）</div>
+        <textarea id="editReqHeaders" class="edit-req-headers" placeholder='{"Content-Type":"application/json"}'></textarea>
+        <div class="modal-subtitle">请求体 Body</div>
+        <textarea id="editReqBody" class="edit-req-body" placeholder="请求体原文（可为 JSON / 表单 / 任意文本）"></textarea>
+        <div id="editReqErr" class="modal-error"></div>
+        <div class="modal-actions">
+          <button id="editReqSave" class="btn btn-primary">保存修改</button>
+          <button id="editReqCancel" class="btn">取消</button>
+        </div>
+        <div class="modal-hint">修改会写回本条记录，导出 HAR/JSON 与启动 Mock 都会用新值。Mock 运行中不可编辑。</div>
       </div>
     </div>
   </div>

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Flask 服务：静态页面、REST 控制接口、WebSocket 实时推流。"""
+import base64
 import json
 import mimetypes
 import os
@@ -14,6 +15,7 @@ from flask import Flask, Response, request, send_file, send_from_directory
 from flask_sock import Sock
 
 from . import state
+from .capture_store import _registered_domain
 from .config import HOST, PORT, MOCK_PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG
 
 
@@ -107,6 +109,140 @@ def api_request(seq):
     return json.dumps(rec, ensure_ascii=False)
 
 
+@app.post("/api/request/delete")
+def api_request_delete():
+    """删除单条录制记录。请求体：{"seq": N}"""
+    data = request.get_json(silent=True) or {}
+    seq = data.get("seq")
+    if not isinstance(seq, int) or seq <= 0:
+        return json.dumps({"ok": False, "error": "缺少有效的 seq"}, ensure_ascii=False), 400
+    # 互斥守卫：Mock 运行中录制库已冻结（快照模型），与导入/清空保持一致
+    if state.mock_manager.running:
+        return json.dumps(
+            {"ok": False, "error": "Mock 运行中，录制库已锁定；请先停止 Mock 再删除"},
+            ensure_ascii=False,
+        ), 400
+    if not state.store.remove(seq):
+        return json.dumps({"ok": False, "error": "记录不存在或已删除"}, ensure_ascii=False), 404
+    _broadcast_snapshot()
+    return json.dumps({"ok": True}, ensure_ascii=False)
+
+
+def _broadcast_snapshot():
+    """把最新快照推给所有已连接的客户端，前端树/详情自动刷新。"""
+    try:
+        snap = {
+            "type": "snapshot",
+            "status": state.browser_manager.status_info(),
+            "stats": state.store.stats(),
+            "requests": [state.store.light(r) for r in state.store.requests],
+        }
+        state.broadcast(json.dumps(snap, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def _json_err(error, status):
+    """统一的错误 JSON 响应（带正确 Content-Type）。"""
+    return Response(
+        json.dumps({"ok": False, "error": error}, ensure_ascii=False),
+        status=status,
+        mimetype="application/json",
+    )
+
+
+@app.post("/api/request/mark")
+def api_request_mark():
+    """更新记录级标记（备注 note / 标签 tags）。请求体：{"seq": N, "note"?: str, "tags"?: [str]}"""
+    data = request.get_json(silent=True) or {}
+    seq = data.get("seq")
+    if not isinstance(seq, int) or seq <= 0:
+        return json.dumps({"ok": False, "error": "缺少有效的 seq"}, ensure_ascii=False), 400
+    note = data.get("note")
+    tags = data.get("tags")
+    if note is not None and not isinstance(note, str):
+        return json.dumps({"ok": False, "error": "note 必须是字符串"}, ensure_ascii=False), 400
+    if tags is not None:
+        if not isinstance(tags, list):
+            return json.dumps({"ok": False, "error": "tags 必须是字符串数组"}, ensure_ascii=False), 400
+        tags = [str(t).strip() for t in tags if str(t).strip()]
+    if not state.store.set_mark(seq, note=note, tags=tags):
+        return json.dumps({"ok": False, "error": "记录不存在或已删除"}, ensure_ascii=False), 404
+    _broadcast_snapshot()
+    return json.dumps({"ok": True}, ensure_ascii=False)
+
+
+@app.post("/api/request/annotate")
+def api_request_annotate():
+    """设置/删除字段级注释。请求体：{"seq": N, "target": "req"|"res", "path": "a.b.0.c", "note": "注释或空串删除"}"""
+    data = request.get_json(silent=True) or {}
+    seq = data.get("seq")
+    target = data.get("target")
+    path = data.get("path")
+    note = data.get("note")
+    if not isinstance(seq, int) or seq <= 0:
+        return json.dumps({"ok": False, "error": "缺少有效的 seq"}, ensure_ascii=False), 400
+    if target not in ("req", "res"):
+        return json.dumps({"ok": False, "error": "target 必须是 req 或 res"}, ensure_ascii=False), 400
+    if not isinstance(path, str) or not path.strip():
+        return json.dumps({"ok": False, "error": "缺少有效的 path"}, ensure_ascii=False), 400
+    if note is not None and not isinstance(note, str):
+        return json.dumps({"ok": False, "error": "note 必须是字符串"}, ensure_ascii=False), 400
+    if not state.store.set_annotation(seq, target, path.strip(), (note or "").strip()):
+        return json.dumps({"ok": False, "error": "记录不存在或已删除"}, ensure_ascii=False), 404
+    _broadcast_snapshot()
+    return json.dumps({"ok": True}, ensure_ascii=False)
+
+
+@app.post("/api/request/edit")
+def api_request_edit():
+    """编辑请求数据（造数据用）：修改 URL / 请求头 / 请求体。
+    请求体：{"seq":N, "url"?:str, "req_headers"?:str(JSON 文本), "req_body"?:str}
+    修改 URL 时自动重算 scheme/host/registered_domain/path/query，保持左侧树分组与导出一致。
+    与删除/导入一致，Mock 运行中冻结录制库，拒绝编辑。"""
+    data = request.get_json(silent=True) or {}
+    seq = data.get("seq")
+    if not isinstance(seq, int) or seq <= 0:
+        return _json_err("缺少有效的 seq", 400)
+    if state.mock_manager.running:
+        return _json_err("Mock 运行中，录制库已锁定；请先停止 Mock 再编辑", 400)
+    rec = state.store.get(seq)
+    if rec is None:
+        return _json_err("记录不存在或已删除", 404)
+
+    new_url = data.get("url")
+    if new_url is not None:
+        new_url = str(new_url).strip()
+        if not new_url:
+            return _json_err("URL 不能为空", 400)
+        parsed = urlparse(new_url)
+        if not parsed.scheme or not parsed.netloc:
+            return _json_err("URL 格式无效（需含 http(s)://host）", 400)
+        rec["url"] = new_url
+        rec["scheme"] = parsed.scheme
+        rec["host"] = parsed.netloc
+        rec["registered_domain"] = _registered_domain(new_url) or parsed.netloc
+        rec["path"] = parsed.path
+        rec["query"] = parsed.query
+
+    hdr_raw = data.get("req_headers")
+    if hdr_raw is not None:
+        try:
+            hdr = json.loads(hdr_raw) if str(hdr_raw).strip() else {}
+        except Exception as e:
+            return _json_err(f"请求头不是合法 JSON：{e}", 400)
+        if not isinstance(hdr, dict):
+            return _json_err("请求头必须是 JSON 对象", 400)
+        rec.setdefault("request", {})["headers"] = {str(k): str(v) for k, v in hdr.items()}
+
+    body_raw = data.get("req_body")
+    if body_raw is not None:
+        rec.setdefault("request", {})["post_data"] = str(body_raw)
+
+    _broadcast_snapshot()
+    return Response(json.dumps({"ok": True}, ensure_ascii=False), mimetype="application/json")
+
+
 # ---------------- 辅助：从记录推断文件名 / MIME ----------------
 _MIME_BY_TYPE = {
     "SCRIPT": "application/javascript",
@@ -192,6 +328,7 @@ def api_get_config():
             "mock_port": USER_CONFIG.get("mock_port"),
             "running_port": request.host.split(":")[1] if ":" in request.host else "80",
             "browser_options": ["auto", "chrome", "edge"],
+            "last_source_har": USER_CONFIG.get("last_source_har"),
         },
         ensure_ascii=False,
     )
@@ -437,6 +574,19 @@ def api_mock_apis():
     )
 
 
+@app.route("/api/mock/logs", methods=["GET", "POST"])
+def api_mock_logs():
+    """返回 Mock 处理记录（收到的请求 + 返回数据），最新在前。"""
+    m = state.mock_manager
+    return Response(
+        json.dumps(
+            {"running": m.running, "logs": m.logs_list()},
+            ensure_ascii=False,
+        ),
+        mimetype="application/json",
+    )
+
+
 @app.post("/api/mock/test")
 def api_mock_test():
     """快速测试某条 mock 接口：由主服务代理请求到 mock 端口，避开跨域(CORS)。
@@ -494,48 +644,118 @@ def api_mock_test():
         )
 
 
-@app.post("/api/import")
-def api_import():
-    f = request.files.get("file")
-    if f is None or not f.filename:
-        return json.dumps({"ok": False, "error": "未收到文件"}, ensure_ascii=False), 400
-    raw = f.read()
-    try:
-        obj = json.loads(raw.decode("utf-8", "replace"))
-    except Exception as e:
-        return json.dumps({"ok": False, "error": f"文件不是合法 JSON/HAR：{e}"}, ensure_ascii=False), 400
+def _import_files(files):
+    """公共导入逻辑（多文件 / 单文件 / base64 打开共用）：
+    两阶段原子导入——先全部解析+格式识别+结构校验（不碰 store），
+    有任一坏文件则整体拒绝（现有数据不丢），全部合法才 clear 一次后合并追加。
+    返回 (ok: bool, resp: dict, status: int)。"""
+    files = [f for f in files if f is not None and f.filename]
+    if not files:
+        return False, {"ok": False, "error": "未收到文件"}, 400
 
-    try:
+    parsed = []  # (filename, kind, obj)
+    errors = []
+    for f in files:
+        try:
+            # utf-8-sig：兼容带 UTF-8 BOM 的 HAR（Chrome/Fiddler 导出偶尔带）
+            obj = json.loads(f.read().decode("utf-8-sig", "replace"))
+        except Exception as e:
+            errors.append(f"{f.filename}：不是合法 JSON/HAR（{e}）")
+            continue
         if (
             isinstance(obj, dict)
             and isinstance(obj.get("log"), dict)
-            and "entries" in obj["log"]
+            and isinstance(obj["log"].get("entries"), list)
         ):
-            n = state.store.import_from_har(obj)
-            kind = "HAR"
-        elif isinstance(obj, dict) and "requests" in obj:
-            n = state.store.import_from_json(obj)
-            kind = "JSON"
+            parsed.append((f.filename, "HAR", obj))
+        elif isinstance(obj, dict) and isinstance(obj.get("requests"), list):
+            parsed.append((f.filename, "JSON", obj))
         else:
-            return json.dumps(
-                {"ok": False, "error": "无法识别文件格式（既不是本工具 JSON，也不是 HAR）"},
-                ensure_ascii=False,
-            ), 400
-    except Exception as e:
-        return json.dumps({"ok": False, "error": f"导入失败：{e}"}, ensure_ascii=False), 500
+            errors.append(f"{f.filename}：无法识别文件格式（既不是本工具 JSON，也不是 HAR）")
 
-    # 把最新快照推给所有已连接的客户端，前端树会自动刷新
+    if errors:
+        return False, {"ok": False, "error": "以下文件无法导入：\n" + "\n".join(errors)}, 400
+    if not parsed:
+        return False, {"ok": False, "error": "未识别到任何可导入的文件"}, 400
+
+    total = 0
+    kinds = []
     try:
-        snap = {
-            "type": "snapshot",
-            "status": state.browser_manager.status_info(),
-            "stats": state.store.stats(),
-            "requests": [state.store.light(r) for r in state.store.requests],
-        }
-        state.broadcast(json.dumps(snap, ensure_ascii=False))
-    except Exception:
-        pass
-    return json.dumps({"ok": True, "kind": kind, "count": n}, ensure_ascii=False)
+        state.store.clear_all()
+        for _fn, kind, obj in parsed:
+            if kind == "HAR":
+                n = state.store.import_from_har(obj, clear=False)
+            else:
+                n = state.store.import_from_json(obj, clear=False)
+            if n > 0 and kind not in kinds:
+                kinds.append(kind)
+            total += n
+    except Exception as e:
+        return False, {"ok": False, "error": f"导入失败：{e}"}, 500
+
+    _broadcast_snapshot()
+    return True, {"ok": True, "kind": "+".join(kinds) or "HAR", "count": total, "files": len(parsed)}, 200
+
+
+class _MemoryFile:
+    """内存文件对象（给 _import_files 用，模拟 flask FileStorage 的最小接口）。"""
+
+    def __init__(self, filename, data):
+        self.filename = filename
+        self._d = data
+
+    def read(self):
+        return self._d
+
+
+@app.post("/api/import")
+def api_import():
+    # 支持多文件：FormData 里多个 "files"；兼容旧的单个 "file" 字段
+    files = request.files.getlist("files")
+    if not files:
+        f = request.files.get("file")
+        files = [f] if f is not None else []
+    ok, resp, status = _import_files(files)
+    # 上传导入拿不到完整路径，不可再「保存」覆盖旧文件：清空来源关联
+    if ok:
+        state.store.source_path = None
+        try:
+            cfg = USER_CONFIG
+            if cfg.get("last_source_har"):
+                cfg["last_source_har"] = ""
+                with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
+                    json.dump(cfg, fh, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+    return json.dumps(resp, ensure_ascii=False), status
+
+
+@app.post("/api/import_base64")
+def api_import_base64():
+    """「打开」流程：前端经 pywebview 原生打开对话框拿到真实路径 + base64 内容，
+    这里导入并记录来源路径（之后「保存」可直接覆盖写回该文件）。
+    请求体：{"name", "content_b64", "source_path"}"""
+    data = request.get_json(silent=True) or {}
+    name = data.get("name") or "imported.har"
+    content_b64 = data.get("content_b64") or ""
+    source_path = data.get("source_path") or ""
+    try:
+        raw = base64.b64decode(content_b64)
+    except Exception as e:
+        return json.dumps({"ok": False, "error": f"内容解码失败：{e}"}, ensure_ascii=False), 400
+    ok, resp, status = _import_files([_MemoryFile(name, raw)])
+    if ok:
+        state.store.source_path = source_path or None
+        if source_path:
+            try:
+                cfg = USER_CONFIG
+                cfg["last_source_har"] = source_path
+                with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
+                    json.dump(cfg, fh, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+        resp["source_path"] = source_path
+    return json.dumps(resp, ensure_ascii=False), status
 
 
 # ---------------- WebSocket 实时推流 ----------------

@@ -32,10 +32,14 @@ const localPathEl = $("localPath");
 const startUrlEl = $("startUrl");
 
 const searchEl = $("search");
+const searchClearEl = $("searchClear");
+const searchHistoryBtnEl = $("searchHistoryBtn");
+const searchHistoryEl = $("searchHistory");
 const methodFilterEl = $("methodFilter");
 const typeFilterEl = $("typeFilter");
 const onlyApiEl = $("onlyApi");
 const onlyErrorEl = $("onlyError");
+const ignoreHeadersEl = $("ignoreHeaders");
 
 // ---------------- 状态 ----------------
 let allRequests = [];
@@ -46,6 +50,7 @@ let activeSeq = null;
 let currentDetail = null;
 let recordingActive = false;  // 是否正在录制（互斥用）
 let mockRunning = false;      // Mock 是否运行中（冻结录制库用）
+let sortBy = "default";       // 列表排序方式：default=按时间 / url=按 API 地址
 
 // ---------------- 工具 ----------------
 function esc(x) {
@@ -55,6 +60,40 @@ function esc(x) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// 把搜索框内容拆成多个「或」条件：用 | 或换行分隔；空词忽略。
+// 仅一个词时与原行为完全一致（仍是整串子串匹配）。
+function searchTokens() {
+  const raw = (filters.search || "").trim();
+  if (!raw) return [];
+  return raw.split(/[|\n]+/).map((t) => t.trim()).filter((t) => t !== "");
+}
+
+// 把搜索词在当前文本里高亮（仅在有筛选词时生效）。
+// 先对文本做 HTML 转义，再对「同样转义后的搜索词」做不区分大小写匹配，
+// 这样命中位置的可见字符与用户肉眼看到的一致，且不会破坏 HTML。
+let _hlRe = null, _hlQ = null;
+function hlRe() {
+  const q = (filters.search || "").trim();
+  if (q === _hlQ) return _hlRe;
+  _hlQ = q;
+  const terms = searchTokens();
+  if (!terms.length) { _hlRe = null; return null; }
+  const parts = terms.map((t) =>
+    esc(t.toLowerCase()).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  );
+  try { _hlRe = new RegExp(parts.join("|"), "gi"); }
+  catch (e) { _hlRe = null; }
+  return _hlRe;
+}
+function hl(text) {
+  if (text === null || text === undefined) return "";
+  const s = esc(text);
+  const re = hlRe();
+  if (!re) return s;
+  re.lastIndex = 0;
+  return s.replace(re, (m) => `<mark class="hl">${m}</mark>`);
 }
 
 function fmtSize(bytes) {
@@ -85,6 +124,48 @@ function pretty(text) {
   }
 }
 
+// 请求体/响应体的可复制代码块：右上角「复制」按钮，绕开 WebView2 下
+// 选中文本后 Ctrl+C / 右键复制不稳定的问题，保证一键复制原始内容。
+function codeBlock(text) {
+  return (
+    `<div class="code-wrap">` +
+    `<button class="btn-mini code-copy" type="button" data-copy>复制</button>` +
+    `<pre class="code">${hl(pretty(text))}</pre>` +
+    `</div>`
+  );
+}
+
+function buildHaystack(r, noReqHdr) {
+  // 把一条记录里可检索文本拼成一串（小写），用于「按数据过滤」，
+  // 覆盖 URL/域名/方法/Query/请求头/请求体/响应头/响应体/备注/标签/字段注释。
+  // noReqHdr=true 时排除「请求头」（Authorization/Cookie/Content-Type 等常造成误命中）。
+  const parts = [];
+  const push = (v) => { if (v != null && v !== "") parts.push(String(v)); };
+  push(r.method); push(r.url); push(r.host); push(r.registered_domain);
+  push(r.resource_type); push(r.path); push(r.query);
+  push(r.note);
+  if (r.tags && r.tags.length) push(r.tags.join(" "));
+  const req = r.request || {};
+  const resp = r.response || {};
+  const hdrs = (o) => { if (o) for (const k in o) { push(k); push(o[k]); } };
+  if (!noReqHdr) hdrs(req.headers);
+  push(req.post_data);
+  hdrs(resp.headers);
+  push(resp.body);
+  const ann = r.annotations || {};
+  for (const t in ann) { const m = ann[t] || {}; for (const p in m) push(m[p]); }
+  return parts.join("  ").toLowerCase();
+}
+function recordHaystack(r) {
+  // 缓存两种变体：完整 / 忽略请求头；随「忽略请求头」开关切换
+  if (filters.ignoreReqHeaders) {
+    if (r._hayNoReqHdr == null) r._hayNoReqHdr = buildHaystack(r, true);
+    return r._hayNoReqHdr;
+  }
+  if (r._hay == null) r._hay = buildHaystack(r, false);
+  return r._hay;
+}
+
 function passFilter(r) {
   const f = filters;
   if (f.method !== "all" && (r.method || "").toUpperCase() !== f.method) return false;
@@ -95,14 +176,16 @@ function passFilter(r) {
     if (!r.is_failed && !(s >= 400)) return false;
   }
   if (f.search) {
-    const q = f.search.toLowerCase();
-    const hay = ((r.url || "") + " " + (r.host || "") + " " + (r.registered_domain || "") + " " + (r.method || "")).toLowerCase();
-    if (!hay.includes(q)) return false;
+    const terms = searchTokens();
+    if (terms.length) {
+      const hay = recordHaystack(r);
+      if (!terms.some((t) => hay.includes(t.toLowerCase()))) return false;
+    }
   }
   return true;
 }
 
-const filters = { search: "", method: "all", type: "all", onlyApi: false, onlyError: false };
+const filters = { search: "", method: "all", type: "all", onlyApi: false, onlyError: false, ignoreReqHeaders: false };
 
 // ---------------- WebSocket ----------------
 function connect() {
@@ -132,6 +215,8 @@ function handleMsg(msg) {
     scheduleRender();
   } else if (msg.type === "mock") {
     if (msg.status) updateMockUI(msg.status);
+  } else if (msg.type === "mock_log") {
+    loadMockLogs();
   }
 }
 
@@ -239,6 +324,7 @@ function loadMockApis() {
       `<div class="mock-api-row" data-i="${i}">
         <span class="method-badge m-${String(a.method || "GET").toUpperCase()}">${esc(a.method || "GET")}</span>
         <span class="mock-api-path" title="${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}">${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}</span>
+        ${rowMarkHtml(a)}
         <span class="resp-badge">${esc(String(a.status))}</span>
         <button class="btn btn-sm mock-test-one">测试</button>
         <pre class="mock-api-result" style="display:none"></pre>
@@ -320,6 +406,84 @@ async function testAllMockApis() {
 mockRefreshBtn.addEventListener("click", loadMockApis);
 $("mockTestAllBtn").addEventListener("click", testAllMockApis);
 
+// ---------------- Mock 处理记录（收到的请求 + 返回数据）----------------
+let mockLogs = [];
+const mockLogList = $("mockLogList");
+const mockLogsCount = $("mockLogsCount");
+const mockLogsRefreshBtn = $("mockLogsRefreshBtn");
+const mockLogModal = $("mockLogModal");
+const mockLogModalBody = $("mockLogModalBody");
+
+function fmtTime(ts) {
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function loadMockLogs() {
+  return postJSON("/api/mock/logs", {})
+    .then((res) => {
+      if (res.data) { mockLogs = res.data.logs || []; renderMockLogs(); }
+    })
+    .catch(() => {});
+}
+
+function renderMockLogs() {
+  if (!mockLogList) return;
+  mockLogsCount.textContent = mockLogs.length ? `(${mockLogs.length})` : "";
+  if (!mockLogs.length) {
+    mockLogList.innerHTML = `<div class="mock-api-empty">暂无处理记录（Mock 收到请求后这里会实时显示，点击可查看详情）。</div>`;
+    return;
+  }
+  mockLogList.innerHTML = mockLogs
+    .map((l, i) => {
+      const sc = l.status >= 400 ? "s-4" : (l.status >= 300 ? "s-3" : (l.matched ? "s-2" : "s-fail"));
+      const miss = l.matched ? "" : `<span class="badge miss">未命中</span>`;
+      return (
+        `<div class="mock-log-row" data-i="${i}">` +
+        `<span class="log-ts">${fmtTime(l.ts)}</span>` +
+        `<span class="m m-${methodClass(l)}">${esc(l.method)}</span>` +
+        `<span class="s ${sc}">${esc(String(l.status))}</span>` +
+        `<span class="path-text" title="${esc(l.url || "")}">${esc(l.path || "/")}${l.query ? "?" + esc(l.query) : ""}</span>` +
+        miss +
+        `</div>`
+      );
+    })
+    .join("");
+  mockLogList.querySelectorAll(".mock-log-row").forEach((row) => {
+    row.addEventListener("click", () => showMockLogDetail(mockLogs[parseInt(row.getAttribute("data-i"), 10)]));
+  });
+}
+
+function showMockLogDetail(log) {
+  if (!log || !mockLogModal) return;
+  const miss = log.matched ? "" : `<span style="color:#A32D2D">未命中（返回 404）</span>`;
+  const reqHdr = log.req_headers && Object.keys(log.req_headers).length
+    ? kvTable(log.req_headers)
+    : `<div class="note">无请求头</div>`;
+  const resHdr = log.res_headers && Object.keys(log.res_headers).length
+    ? kvTable(log.res_headers)
+    : `<div class="note">无响应头</div>`;
+  const reqBody = log.req_body ? codeBlock(pretty(log.req_body)) : `<div class="note">无请求体</div>`;
+  const resBody = log.res_body ? codeBlock(pretty(log.res_body)) : `<div class="note">空响应体</div>`;
+  mockLogModalBody.innerHTML =
+    `<div class="mock-log-sec"><div class="mock-log-sec-title">请求</div>` +
+    `<div class="mock-log-url">${esc(log.method)} ${esc(log.url || "")}</div>` +
+    `<div class="mock-log-sub">请求头</div>${reqHdr}` +
+    `<div class="mock-log-sub">请求体</div>${reqBody}</div>` +
+    `<div class="mock-log-sec"><div class="mock-log-sec-title">响应 ${esc(String(log.status))} ${miss}</div>` +
+    `<div class="mock-log-sub">响应头</div>${resHdr}` +
+    `<div class="mock-log-sub">响应体</div>${resBody}</div>`;
+  mockLogModal.classList.remove("hide");
+}
+
+if (mockLogsRefreshBtn) mockLogsRefreshBtn.addEventListener("click", loadMockLogs);
+if (mockLogModal) {
+  $("mockLogModalClose").addEventListener("click", () => mockLogModal.classList.add("hide"));
+  mockLogModal.addEventListener("click", (e) => { if (e.target === mockLogModal) mockLogModal.classList.add("hide"); });
+}
+if (mockLogList) loadMockLogs();  // 页面加载时先拉一次（进程内 Mock 不随刷新消失）
+
 // ---------------- 渲染树 ----------------
 function scheduleRender() {
   if (renderTimer) return;
@@ -337,17 +501,36 @@ function reqRowHtml(r) {
     `<span class="m m-${mc}">${esc(r.method)}</span>` +
     `<span class="s ${sc}">${esc(String(statusTxt))}</span>` +
     `<span class="t-type">${esc(r.resource_type)}</span>` +
-    `<span class="path-text" title="${esc(r.url)}">${esc(path)}</span>` +
-    `<span class="size">${fmtSize(r.response && r.response.size_bytes)}</span>` +
-    `<span class="dur">${r.duration_ms != null ? r.duration_ms + "ms" : ""}</span>` +
+    `<span class="path-text" title="${esc(r.url)}">${hl(path)}</span>` +
+    rowMarkHtml(r) +
+    `<span class="req-del" data-del-seq="${r.seq}" title="删除该条录制记录">×</span>` +
     `</div>`
   );
+}
+
+function rowMarkHtml(r) {
+  const note = r.note || "";
+  const tags = r.tags || [];
+  if (!note && !tags.length) return "";
+  const noteEl = note
+    ? `<span class="row-mark-note" title="${esc(note)}">📌 ${hl(truncate(note, 30))}</span>`
+    : "";
+  const tagsEl = tags.map((t) => `<span class="row-tag">${hl(t)}</span>`).join("");
+  return `<span class="row-mark">${noteEl}${tagsEl}</span>`;
+}
+
+function truncate(s, n) {
+  return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
 function render() {
   const groups = new Map();
   let visible = 0;
-  for (const r of allRequests) {
+  // 按排序方式先整体排序（保持筛选行为不变）
+  const src = sortBy === "url"
+    ? [...allRequests].sort((a, b) => (a.url || "").localeCompare(b.url || ""))
+    : allRequests;
+  for (const r of src) {
     if (!passFilter(r)) continue;
     visible++;
     const rd = r.registered_domain || r.host || "unknown";
@@ -379,7 +562,7 @@ function render() {
     html +=
       `<div class="node"><div class="row domain-row" data-toggle="${esc(rdKey)}">` +
       `<span class="caret">${rdCollapsed ? "▸" : "▾"}</span>` +
-      `<span class="domain-name">${esc(rd)}</span>` +
+      `<span class="domain-name">${hl(rd)}</span>` +
       `<span class="badge">${rdRecs.length}</span>` +
       `<span class="size">${fmtSize(rdSize)}</span>` +
       `</div><div class="children${rdCollapsed ? " hidden" : ""}">`;
@@ -398,7 +581,7 @@ function render() {
       html +=
         `<div class="node"><div class="row host-row" data-toggle="${esc(hKey)}">` +
         `<span class="caret">${hCollapsed ? "▸" : "▾"}</span>` +
-        `<span class="host-name">${esc(host)}</span>` +
+        `<span class="host-name">${hl(host)}</span>` +
         `<span class="badge">${recs.length}</span>` +
         `<span class="size">${fmtSize(hSize)}</span>` +
         `</div><div class="children${hCollapsed ? " hidden" : ""}">`;
@@ -429,6 +612,12 @@ function toggle(key) {
 }
 
 treeEl.addEventListener("click", (e) => {
+  const del = e.target.closest("[data-del-seq]");
+  if (del) {
+    e.stopPropagation();
+    deleteRequest(parseInt(del.getAttribute("data-del-seq"), 10));
+    return;
+  }
   const t = e.target.closest("[data-toggle]");
   if (t) { toggle(t.getAttribute("data-toggle")); return; }
   const req = e.target.closest(".req-row");
@@ -438,6 +627,32 @@ treeEl.addEventListener("click", (e) => {
     req.classList.add("active");
   }
 });
+
+// ---------------- 删除单条录制 ----------------
+function deleteRequest(seq) {
+  if (mockRunning) {
+    alert("Mock 运行中，录制库已锁定；请先停止 Mock 再删除。");
+    return;
+  }
+  const rec = allRequests.find((r) => r.seq === seq);
+  const label = rec
+    ? `${rec.method} ${rec.path || "/"}${rec.query ? "?" + rec.query : ""}`
+    : "该请求";
+  if (!confirm(`删除这条录制记录？\n\n${label}`)) return;
+  postJSON("/api/request/delete", { seq })
+    .then((res) => {
+      if (res.ok && res.data && res.data.ok) {
+        if (activeSeq === seq) {
+          activeSeq = 0;
+          detailEl.innerHTML = `<div class="empty">选择左侧请求查看详情</div>`;
+        }
+        // 树由后端广播 snapshot 自动刷新
+      } else {
+        alert("删除失败：" + ((res.data && res.data.error) || "未知错误"));
+      }
+    })
+    .catch((e) => alert("删除失败：" + e));
+}
 
 // ---------------- 详情 ----------------
 function openDetail(seq) {
@@ -459,8 +674,12 @@ function renderDetail(rec) {
   const hasBody = rec.response && rec.response.body != null;
   const head =
     `<div class="detail-head">` +
-    `<div class="detail-title">${esc(rec.method)} ${esc(rec.url)}</div>` +
+    `<div class="detail-title">${esc(rec.method)} ${hl(rec.url)} <button class="btn-mini" data-copy-url title="复制完整请求地址">📋 复制</button></div>` +
+    `<div class="head-actions">` +
+    `<button class="btn-mini" id="editReqBtn" title="编辑请求（URL / 请求头 / 请求体），用于造数据">✏ 编辑请求</button>` +
     (hasBody ? `<button class="btn-mini" id="downloadFileBtn" title="将响应体另存为文件">⬇ 下载文件</button>` : "") +
+    `<button class="btn-mini" id="delDetailBtn" title="删除该条录制记录">🗑 删除</button>` +
+    `</div>` +
     `<div class="detail-meta">状态 <span class="${sc}">${esc(String(statusTxt))}</span> · 类型 ${esc(rec.resource_type)} · ` +
     `大小 ${fmtSize(rec.response && rec.response.size_bytes)} · 耗时 ${rec.duration_ms != null ? rec.duration_ms + "ms" : "—"}` +
     `<br>域 ${esc(rec.registered_domain)} · host ${esc(rec.host)}</div>` +
@@ -471,7 +690,8 @@ function renderDetail(rec) {
     tabBtn("res-headers", "响应头") + tabBtn("res-body", "响应体") + tabBtn("query", "Query") +
     tabBtn("timing", "Timing") +
     `</div>`;
-  detailEl.innerHTML = head + tabs + `<div class="detail-body" id="detailBody">${renderTab(rec, currentTab)}</div>`;
+  const tagsPanel = `<div class="detail-tags">${tagsEditorHtml(rec)}</div>`;
+  detailEl.innerHTML = head + tagsPanel + tabs + `<div class="detail-body" id="detailBody">${renderTab(rec, currentTab)}</div>`;
 
   detailEl.querySelectorAll(".tab").forEach((el) => {
     el.addEventListener("click", () => {
@@ -481,6 +701,38 @@ function renderDetail(rec) {
       $("detailBody").innerHTML = renderTab(rec, currentTab);
     });
   });
+
+  const delDetailBtn = $("delDetailBtn");
+  if (delDetailBtn) {
+    delDetailBtn.addEventListener("click", () => deleteRequest(rec.seq));
+  }
+
+  const editReqBtn = $("editReqBtn");
+  if (editReqBtn) {
+    editReqBtn.addEventListener("click", () => openEditReq(rec));
+  }
+
+  const markSaveBtn = $("markSaveBtn");
+  if (markSaveBtn) {
+    markSaveBtn.addEventListener("click", () => {
+      const tagsRaw = ($("markTagsInput") && $("markTagsInput").value) || "";
+      const tags = tagsRaw.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+      markSaveBtn.disabled = true;
+      postJSON("/api/request/mark", { seq: rec.seq, tags })
+        .then((res) => {
+          if (res.ok && res.data && res.data.ok) {
+            if (currentDetail) { currentDetail.tags = tags; }
+            // 树由后端广播 snapshot 刷新（标记图标）；详情本地已更新
+            markSaveBtn.textContent = "已保存 ✓";
+            setTimeout(() => { markSaveBtn.textContent = "保存"; }, 1200);
+          } else {
+            alert("保存标签失败：" + ((res.data && res.data.error) || "未知错误"));
+          }
+        })
+        .catch((e) => alert("保存标签失败：" + e))
+        .finally(() => { markSaveBtn.disabled = false; });
+    });
+  }
 
   const dlBtn = $("downloadFileBtn");
   if (dlBtn) {
@@ -526,7 +778,7 @@ function kvTable(obj) {
   if (!obj || Object.keys(obj).length === 0) return `<div class="note">无</div>`;
   let h = `<table class="kv">`;
   for (const [k, v] of Object.entries(obj)) {
-    h += `<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`;
+    h += `<tr><td class="k">${hl(k)}</td><td>${hl(v)}</td></tr>`;
   }
   return h + `</table>`;
 }
@@ -537,7 +789,7 @@ function renderTab(rec, which) {
     return (
       `<table class="kv">` +
       `<tr><td class="k">方法</td><td>${esc(rec.method)}</td></tr>` +
-      `<tr><td class="k">URL</td><td>${esc(rec.url)}</td></tr>` +
+      `<tr><td class="k">URL</td><td class="url-cell">${hl(rec.url)} <button class="btn-mini" data-copy-url title="复制请求地址">复制</button></td></tr>` +
       `<tr><td class="k">状态</td><td>${esc(String(rec.is_failed ? "失败" : (r.status != null ? r.status : "—")))} ${esc(r.status_text || "")}</td></tr>` +
       `<tr><td class="k">资源类型</td><td>${esc(rec.resource_type)}</td></tr>` +
       `<tr><td class="k">MIME</td><td>${esc(r.mime_type || "—")}</td></tr>` +
@@ -552,7 +804,7 @@ function renderTab(rec, which) {
   if (which === "req-body") {
     const t = rec.request && rec.request.post_data;
     if (t == null) return `<div class="note">无请求体</div>`;
-    return `<pre class="code">${esc(pretty(t))}</pre>`;
+    return jsonOrCode(t, rec, "req");
   }
   if (which === "res-headers") return kvTable(rec.response && rec.response.headers);
   if (which === "res-body") {
@@ -562,7 +814,7 @@ function renderTab(rec, which) {
       if ((r.body_size || 0) > 0) return `<div class="note">二进制响应体（大小 ${fmtSize(r.body_size)}），未捕获原文。</div>`;
       return `<div class="note">无响应体</div>`;
     }
-    return `<pre class="code">${esc(pretty(t))}</pre>` + (r.truncated ? `<div class="note">⚠ 内容已截断，完整内容见导出的 HAR / JSON。</div>` : "");
+    return jsonOrCode(t, rec, "res") + (r.truncated ? `<div class="note">⚠ 内容已截断，完整内容见导出的 HAR / JSON。</div>` : "");
   }
   if (which === "query") {
     if (!rec.query) return `<div class="note">无 Query 参数</div>`;
@@ -573,6 +825,190 @@ function renderTab(rec, which) {
   }
   if (which === "timing") return kvTable(rec.timing);
   return "";
+}
+
+// ---------------- 标记（记录级备注 + 标签）----------------
+function tagsEditorHtml(rec) {
+  const tags = (rec.tags || []).join(", ");
+  return (
+    `<div class="tags-bar">` +
+    `<span class="tags-label">标签</span>` +
+    `<input id="markTagsInput" class="input tags-input" placeholder="登录, 核心" value="${esc(tags)}" />` +
+    `<button class="btn-mini" id="markSaveBtn">保存</button>` +
+    `</div>`
+  );
+}
+
+// ---------------- 字段级注释：JSON 树渲染 ----------------
+function jsonOrCode(text, rec, target) {
+  let obj = null;
+  try { obj = JSON.parse(text); } catch (e) { /* 非 JSON，按原样文本渲染 */ }
+  if (obj === null || typeof obj !== "object") return codeBlock(text);
+  const ann = (rec.annotations && rec.annotations[target]) || {};
+  const raw = JSON.stringify(obj, null, 2);
+  return (
+    `<div class="code-wrap">` +
+    `<button class="btn-mini code-copy" data-copy>复制</button>` +
+    `<div class="code jtree" data-raw="${esc(raw)}">` +
+    jsonTreeHtml(obj, "", ann, target) +
+    `</div></div>`
+  );
+}
+
+function jsonTreeHtml(v, path, ann, target) {
+  const note = ann[path];
+  const cls = note ? " j-annotated" : "";
+  const noteTxt = note ? `<span class="j-note-txt"> // ${esc(note)}</span>` : "";
+  const btn = `<span class="j-note-btn" data-ann-path="${esc(path)}" data-ann-target="${target}" title="添加/编辑注释">✎</span>`;
+
+  // 标量 / null：用 span 行内，避免被外层 key 行 div 强制换行
+  if (v === null) {
+    return `<span class="jline jval-null${cls}"><span class="j-null">null</span>${noteTxt}${btn}</span>`;
+  }
+  const t = typeof v;
+  if (t === "string" || t === "number" || t === "boolean") {
+    return `<span class="jline jval-${t}${cls}"><span class="j-${t}">${hl(String(v))}</span>${noteTxt}${btn}</span>`;
+  }
+
+  // 数组 / 对象：容器本身用 div 整行
+  if (Array.isArray(v)) {
+    if (v.length === 0) {
+      return `<div class="jline${cls}"><span class="j-punc">[]</span>${noteTxt}${btn}</div>`;
+    }
+    let h = `<div class="jline${cls}"><span class="j-punc">[</span>${noteTxt}${btn}</div><div class="jind">`;
+    v.forEach((item, i) => { h += jsonTreeHtml(item, path ? path + "." + i : String(i), ann, target); });
+    h += `</div><div class="jline"><span class="j-punc">]</span></div>`;
+    return h;
+  }
+  // object
+  const keys = Object.keys(v);
+  if (keys.length === 0) {
+    return `<div class="jline${cls}"><span class="j-punc">{}</span>${noteTxt}${btn}</div>`;
+  }
+  let h = `<div class="jline${cls}"><span class="j-punc">{</span>${noteTxt}${btn}</div><div class="jind">`;
+  keys.forEach((k) => {
+    const childPath = path ? path + "." + k : k;
+    h += `<div class="jline">` +
+      `<span class="j-key">${hl(JSON.stringify(k))}</span><span class="j-punc">: </span>` +
+      jsonTreeHtml(v[k], childPath, ann, target) +
+      `</div>`;
+  });
+  h += `</div><div class="jline"><span class="j-punc">}</span></div>`;
+  return h;
+}
+
+function annotateField(rec, path, target) {
+  if (mockRunning) { alert("Mock 运行中，录制库已锁定；请先停止 Mock 再编辑注释。"); return; }
+  const ann = (rec.annotations && rec.annotations[target]) || {};
+  const old = ann[path] || "";
+  const note = prompt(old ? "编辑注释（清空后确定 = 删除）：" : "添加注释：", old);
+  if (note === null) return;
+  postJSON("/api/request/annotate", { seq: rec.seq, target, path, note })
+    .then((res) => {
+      if (res.ok && res.data && res.data.ok) {
+        openDetail(rec.seq);  // 重新拉完整记录，刷新注释展示
+      } else {
+        alert("保存注释失败：" + ((res.data && res.data.error) || "未知错误"));
+      }
+    })
+    .catch((e) => alert("保存注释失败：" + e));
+}
+
+// ---------------- 编辑请求（造数据：改 URL / 请求头 / 请求体）----------------
+function openEditReq(rec) {
+  if (mockRunning) { alert("Mock 运行中，录制库已锁定；请先停止 Mock 再编辑。"); return; }
+  const modal = $("editReqModal");
+  if (!modal) return;
+  $("editReqUrl").value = rec.url || "";
+  const hdr = (rec.request && rec.request.headers) || {};
+  $("editReqHeaders").value = Object.keys(hdr).length ? JSON.stringify(hdr, null, 2) : "{}";
+  $("editReqBody").value = (rec.request && rec.request.post_data) != null ? rec.request.post_data : "";
+  $("editReqErr").textContent = "";
+  modal.classList.remove("hide");
+  setTimeout(() => $("editReqUrl") && $("editReqUrl").focus(), 50);
+}
+
+function wireEditReqModal() {
+  const modal = $("editReqModal");
+  if (!modal) return;
+  $("editReqModalClose").addEventListener("click", () => modal.classList.add("hide"));
+  $("editReqCancel").addEventListener("click", () => modal.classList.add("hide"));
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.add("hide"); });
+  $("editReqSave").addEventListener("click", () => {
+    if (!currentDetail) return;
+    const url = $("editReqUrl").value.trim();
+    const headers = $("editReqHeaders").value;
+    const body = $("editReqBody").value;
+    const errEl = $("editReqErr");
+    errEl.textContent = "";
+    const saveBtn = $("editReqSave");
+    saveBtn.disabled = true;
+    postJSON("/api/request/edit", { seq: currentDetail.seq, url, req_headers: headers, req_body: body })
+      .then((res) => {
+        if (res.ok && res.data && res.data.ok) {
+          modal.classList.add("hide");
+          openDetail(currentDetail.seq);  // 重新拉取，刷新标题/概览/树
+        } else {
+          errEl.textContent = "保存失败：" + ((res.data && res.data.error) || "未知错误");
+        }
+      })
+      .catch((e) => { errEl.textContent = "保存失败：" + e; })
+      .finally(() => { saveBtn.disabled = false; });
+  });
+}
+
+// ---------------- 详情内「复制」按钮（请求体 / 响应体）----------------
+// 用可靠的剪贴板路径，绕开 WebView2 下「选中后 Ctrl+C / 右键复制」不稳定的问题。
+detailEl.addEventListener("click", (e) => {
+  const nb = e.target.closest("[data-ann-path]");
+  if (nb && currentDetail) {
+    e.stopPropagation();
+    annotateField(currentDetail, nb.getAttribute("data-ann-path"), nb.getAttribute("data-ann-target"));
+    return;
+  }
+  const copyUrlBtn = e.target.closest("[data-copy-url]");
+  if (copyUrlBtn && currentDetail) {
+    copyText(currentDetail.url || "", copyUrlBtn);
+    return;
+  }
+  const btn = e.target.closest("[data-copy]");
+  if (!btn) return;
+  const wrap = btn.closest(".code-wrap");
+  const pre = wrap && wrap.querySelector(".code");
+  if (!pre) return;
+  const raw = pre.getAttribute("data-raw");
+  copyText(raw != null ? raw : pre.textContent, btn);
+});
+
+function copyText(text, btn) {
+  const ok = () => {
+    const old = btn.textContent;
+    btn.textContent = "已复制 ✓";
+    btn.disabled = true;
+    setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(ok).catch(() => fallbackCopy(text, ok));
+  } else {
+    fallbackCopy(text, ok);
+  }
+}
+
+function fallbackCopy(text, ok) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.top = "-9999px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const copied = document.execCommand("copy");
+    document.body.removeChild(ta);
+    if (copied) { ok(); return; }
+  } catch (e) {}
+  alert("复制失败，请手动选中文本后按 Ctrl+C");
 }
 
 // ---------------- 工具栏 ----------------
@@ -606,6 +1042,93 @@ function saveTextFile(filename, text) {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(u), 1000);
     return "已下载到默认位置";
+  });
+}
+
+// ---------------- 打开 / 保存（编辑后可覆盖原 HAR）----------------
+// sourcePath：当前录制库关联的源文件路径（「打开」时记录，重启后从配置恢复）
+let sourcePath = "";
+const openBtn = $("openBtn");
+const saveBtn = $("saveBtn");
+const sourceHint = $("sourceHint");
+
+function updateSourceHint() {
+  if (!sourceHint) return;
+  if (sourcePath) {
+    sourceHint.textContent = "📄 " + sourcePath.split(/[\\/]/).pop() + "（保存将覆盖此文件）";
+    sourceHint.title = sourcePath;
+    sourceHint.classList.add("on");
+  } else {
+    sourceHint.textContent = "";
+    sourceHint.title = "";
+    sourceHint.classList.remove("on");
+  }
+}
+
+// 页面加载时恢复最近打开的文件关联
+fetch("/api/config").then((r) => r.json()).then((d) => {
+  if (d && d.last_source_har) { sourcePath = d.last_source_har; updateSourceHint(); }
+}).catch(() => {});
+
+if (openBtn) {
+  openBtn.addEventListener("click", () => {
+    window.pywebviewReady.then((pw) => {
+      if (!pw || !pw.api || !pw.api.open_file) {
+        throw new Error("当前为浏览器模式，请改用「导入」按钮；桌面窗口下才能「打开」并覆盖保存。");
+      }
+      return pw.api.open_file();
+    }).then((res) => {
+      if (!res || res.cancelled) return null;
+      if (!res.ok) throw new Error(res.error || "打开失败");
+      return postJSON("/api/import_base64", {
+        name: res.name, content_b64: res.content_b64, source_path: res.path
+      }).then((r) => ({ open: res, imp: r }));
+    }).then((x) => {
+      if (!x) return;
+      const { open, imp } = x;
+      if (imp.ok && imp.data && imp.data.ok) {
+        sourcePath = open.path;
+        updateSourceHint();
+        alert(`已打开 ${open.name}：${imp.data.kind} 共 ${imp.data.count} 条。\n\n编辑（标记/注释/删除）后点「保存」可直接覆盖该文件。`);
+      } else {
+        alert("导入失败：" + ((imp.data && imp.data.error) || "未知错误"));
+      }
+    }).catch((e) => alert("打开失败：" + e.message));
+  });
+}
+
+if (saveBtn) {
+  saveBtn.addEventListener("click", () => {
+    saveBtn.disabled = true;
+    const oldText = saveBtn.textContent;
+    saveBtn.textContent = "保存中…";
+    fetch("/api/export?format=har")
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+      .then((text) => {
+        const b64 = btoa(unescape(encodeURIComponent(text)));
+        return window.pywebviewReady.then((pw) => {
+          if (!pw || !pw.api) throw new Error("当前为浏览器模式，无法直接写盘；请用「导出」另存。");
+          if (sourcePath && pw.api.save_to_path) {
+            return pw.api.save_to_path(sourcePath, b64).then((res) => ({ res, kind: "overwrite" }));
+          }
+          return pw.api.save_file("api-recording.har", b64).then((res) => ({ res, kind: "saveas" }));
+        });
+      })
+      .then(({ res, kind }) => {
+        if (!res) return;
+        if (res.ok) {
+          if (kind === "overwrite") {
+            alert("已保存并覆盖：" + (res.path || sourcePath));
+          } else {
+            if (res.path) { sourcePath = res.path; updateSourceHint(); }
+            alert("已另存为：" + (res.path || ""));
+          }
+        } else if (!res.cancelled) {
+          alert("保存失败：" + (res.error || "未知错误"));
+        }
+      })
+      .catch((e) => alert("保存失败：" + e.message))
+      .finally(() => { saveBtn.disabled = false; saveBtn.textContent = oldText; });
   });
 }
 
@@ -742,6 +1265,8 @@ exportBtn.addEventListener("click", () => exportModal.classList.remove("hide"));
 $("exportModalClose").addEventListener("click", closeExportModal);
 exportModal.addEventListener("click", (e) => { if (e.target === exportModal) closeExportModal(); });
 
+wireEditReqModal();
+
 doExportBtn.addEventListener("click", () => {
   const sel = document.querySelector('input[name="exportFormat"]:checked');
   const fmt = sel ? sel.value : "har";
@@ -756,22 +1281,59 @@ doExportBtn.addEventListener("click", () => {
 
 const importBtn = $("importBtn");
 const importFile = $("importFile");
-importBtn.addEventListener("click", () => importFile.click());
+importBtn.addEventListener("click", () => {
+  window.pywebviewReady.then((pw) => {
+    if (pw && pw.api && pw.api.import_files) {
+      doNativeImport(pw);
+    } else {
+      importFile.click();
+    }
+  });
+});
+
+function doNativeImport(pw) {
+  pw.api.import_files()
+    .then((res) => {
+      if (!res || res.cancelled) return;
+      if (!res.ok) { alert("导入失败：" + (res.error || "未知错误")); return; }
+      const d = res.data || {};
+      if (d.ok) {
+        if (d.source_path) { sourcePath = d.source_path; updateSourceHint(); }
+        else { sourcePath = ""; updateSourceHint(); }
+        alert(
+          `导入成功：${d.kind} 共 ${d.count} 条（${d.files || 1} 个文件，左侧已刷新）` +
+          (d.source_path ? "\n\n已关联原文件，「保存」可直接覆盖写回。" : "")
+        );
+      } else {
+        alert("导入失败：" + (d.error || "未知错误"));
+      }
+    })
+    .catch((e) => alert("导入失败：" + e.message));
+}
+
 importFile.addEventListener("change", () => {
-  const file = importFile.files && importFile.files[0];
-  if (!file) return;
-  if (!confirm("导入将覆盖当前已录制的全部请求，继续？")) {
+  const files = importFile.files;
+  if (!files || !files.length) return;
+  const names = Array.from(files).map((f) => f.name);
+  const tip =
+    files.length === 1
+      ? "导入将覆盖当前已录制的全部请求，继续？"
+      : `导入将覆盖当前已录制的全部请求，并合并导入 ${files.length} 个文件：\n${names.join("\n")}\n\n继续？`;
+  if (!confirm(tip)) {
     importFile.value = "";
     return;
   }
   const fd = new FormData();
-  fd.append("file", file);
+  Array.from(files).forEach((f) => fd.append("files", f));
   importBtn.disabled = true;
   fetch("/api/import", { method: "POST", body: fd })
     .then((r) => r.json().then((d) => ({ ok: r.ok, data: d })))
     .then((res) => {
       if (res.ok && res.data && res.data.ok) {
-        alert(`导入成功：${res.data.kind} 共 ${res.data.count} 条（左侧已刷新）`);
+        alert(
+          `导入成功：${res.data.kind} 共 ${res.data.count} 条` +
+            `（${res.data.files || 1} 个文件，左侧已刷新）`
+        );
       } else {
         alert("导入失败：" + ((res.data && res.data.error) || "未知错误"));
       }
@@ -835,10 +1397,109 @@ function onFilter() {
   filters.type = typeFilterEl.value;
   filters.onlyApi = onlyApiEl.checked;
   filters.onlyError = onlyErrorEl.checked;
+  filters.ignoreReqHeaders = ignoreHeadersEl.checked;
   render();
 }
 [searchEl, methodFilterEl, typeFilterEl].forEach((el) => el.addEventListener("input", onFilter));
-[onlyApiEl, onlyErrorEl].forEach((el) => el.addEventListener("change", onFilter));
+[onlyApiEl, onlyErrorEl, ignoreHeadersEl].forEach((el) => el.addEventListener("change", onFilter));
+
+// 搜索框：清空按钮 + 搜索历史
+const HISTORY_KEY = "api_recoder_search_history";
+const HISTORY_MAX = 12;
+function loadHistory() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function saveHistory(arr) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(arr.slice(0, HISTORY_MAX))); } catch (e) {}
+}
+function recordHistory(term) {
+  term = (term || "").trim();
+  if (!term) return;
+  const arr = loadHistory().filter((t) => t !== term);
+  arr.unshift(term);
+  saveHistory(arr);
+}
+function renderHistory() {
+  const arr = loadHistory();
+  if (!arr.length) {
+    searchHistoryEl.innerHTML = `<div class="hist-empty">暂无搜索历史</div>`;
+    return;
+  }
+  let html = "";
+  for (const t of arr) {
+    html += `<div class="hist-item" data-q="${esc(t)}"><span class="hist-text">${esc(t)}</span><span class="hist-del" data-del="${esc(t)}" title="删除">×</span></div>`;
+  }
+  html += `<div class="hist-clear" id="histClear">清空历史</div>`;
+  searchHistoryEl.innerHTML = html;
+}
+function openHistory() {
+  if (searchHistoryEl.classList.contains("hide")) {
+    renderHistory();
+    searchHistoryEl.classList.remove("hide");
+  } else {
+    searchHistoryEl.classList.add("hide");
+  }
+}
+function closeHistory() { searchHistoryEl.classList.add("hide"); }
+function toggleClear() {
+  if (searchEl.value) searchClearEl.classList.remove("hide");
+  else searchClearEl.classList.add("hide");
+}
+
+searchClearEl.addEventListener("click", () => {
+  searchEl.value = "";
+  toggleClear();
+  onFilter();
+  searchEl.focus();
+});
+searchHistoryBtnEl.addEventListener("click", (e) => { e.stopPropagation(); openHistory(); });
+searchEl.addEventListener("focus", () => { if (loadHistory().length) searchHistoryBtnEl.classList.add("has-history"); });
+searchEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { recordHistory(searchEl.value); closeHistory(); }
+});
+searchHistoryEl.addEventListener("click", (e) => {
+  const del = e.target.closest(".hist-del");
+  if (del) {
+    e.stopPropagation();
+    const q = del.getAttribute("data-del");
+    saveHistory(loadHistory().filter((t) => t !== q));
+    renderHistory();
+    if (!loadHistory().length) searchHistoryBtnEl.classList.remove("has-history");
+    return;
+  }
+  if (e.target.closest("#histClear")) {
+    e.stopPropagation();
+    saveHistory([]);
+    renderHistory();
+    searchHistoryBtnEl.classList.remove("has-history");
+    return;
+  }
+  const item = e.target.closest(".hist-item");
+  if (item) {
+    const q = item.getAttribute("data-q");
+    searchEl.value = q;
+    toggleClear();
+    onFilter();
+    closeHistory();
+    searchEl.focus();
+  }
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".search-wrap")) closeHistory();
+});
+toggleClear();
+
+const sortByEl = $("sortBy");
+if (sortByEl) {
+  sortBy = sortByEl.value || "default";
+  sortByEl.addEventListener("change", () => {
+    sortBy = sortByEl.value || "default";
+    render();
+  });
+}
 
 // ---------------- Tab 切换（API 录制 / Mock 服务，互不干扰）----------------
 const panelApi = $("panelApi");

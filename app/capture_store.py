@@ -120,6 +120,8 @@ class CaptureStore:
             self._seq = 0
             self.started_at = time.time()
             self.ended_at = None
+            # 「打开」关联的源文件路径（「保存」时覆盖写回它）
+            self.source_path = None
 
     def add(self, record):
         """写入一条完整记录（body 已截断到 MAX_BODY_STORE），返回序号 seq。"""
@@ -150,9 +152,57 @@ class CaptureStore:
         with self._lock:
             return self.by_seq.get(seq)
 
+    def remove(self, seq):
+        """删除指定 seq 的记录，返回是否删除成功。"""
+        with self._lock:
+            rec = self.by_seq.pop(seq, None)
+            if rec is None:
+                return False
+            try:
+                self.requests.remove(rec)
+            except ValueError:
+                pass
+            return True
+
     def mark_stopped(self):
         with self._lock:
             self.ended_at = time.time()
+
+    def set_mark(self, seq, note=None, tags=None):
+        """更新记录的记录级标记：note（备注文本）、tags（标签列表）。None 表示不改该字段。"""
+        with self._lock:
+            rec = self.by_seq.get(seq)
+            if rec is None:
+                return False
+            if note is not None:
+                rec["note"] = note
+            if tags is not None:
+                rec["tags"] = tags
+            return True
+
+    def set_annotation(self, seq, target, path, note):
+        """设置/删除某条记录的字段级注释。
+        target: "req"（请求体）| "res"（响应体）；path: JSON 字段路径（如 data.items.0.id）。
+        note 为空字符串 = 删除该注释。返回是否成功。"""
+        with self._lock:
+            rec = self.by_seq.get(seq)
+            if rec is None:
+                return False
+            ann = dict(rec.get("annotations") or {})
+            tgt = dict(ann.get(target) or {})
+            if note:
+                tgt[path] = note
+            else:
+                tgt.pop(path, None)
+            if tgt:
+                ann[target] = tgt
+            else:
+                ann.pop(target, None)
+            if ann:
+                rec["annotations"] = ann
+            else:
+                rec.pop("annotations", None)
+            return True
 
     # ---------- 轻量拷贝（用于 WebSocket 实时推送） ----------
     def light(self, rec):
@@ -260,7 +310,7 @@ class CaptureStore:
         if body_text:
             content["text"] = body_text
 
-        return {
+        entry = {
             "startedDateTime": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(r.get("captured_at", time.time()))),
             "time": r.get("duration_ms") or 0,
             "request": {
@@ -290,15 +340,24 @@ class CaptureStore:
             "_resourceType": (r.get("resource_type") or "other").lower(),
             "_failed": bool(r.get("is_failed")),
         }
+        # 标记信息：本工具自定义字段（_ 前缀），标准 HAR 工具会忽略
+        if r.get("note"):
+            entry["_note"] = r["note"]
+        if r.get("tags"):
+            entry["_tags"] = r["tags"]
+        if r.get("annotations"):
+            entry["_annotations"] = r["annotations"]
+        return entry
 
     # ---------- 导入 ----------
-    def import_from_json(self, obj):
+    def import_from_json(self, obj, clear=True):
         """导入本工具导出的 JSON：{'meta':..., 'requests':[record,...]}。
-        替换当前记录（先 clear_all），返回导入条数。"""
+        clear=True 时替换当前记录（先 clear_all），否则追加到现有记录。返回导入条数。"""
         requests = obj.get("requests")
         if not isinstance(requests, list):
             raise ValueError("JSON 格式缺少 requests 数组")
-        self.clear_all()
+        if clear:
+            self.clear_all()
         n = 0
         for rec in requests:
             if not isinstance(rec, dict):
@@ -310,14 +369,16 @@ class CaptureStore:
         self.mark_stopped()
         return n
 
-    def import_from_har(self, obj):
+    def import_from_har(self, obj, clear=True):
         """导入 HAR 1.2（本工具导出或 Chrome/Fiddler 等标准 HAR 均可）：
-        {'log': {'entries':[entry,...]}}。替换当前记录，返回导入条数。"""
+        {'log': {'entries':[entry,...]}}。clear=True 时替换当前记录（先 clear_all），
+        否则追加到现有记录。返回导入条数。"""
         log = obj.get("log") or {}
         entries = log.get("entries")
         if not isinstance(entries, list):
             raise ValueError("HAR 格式缺少 log.entries 数组")
-        self.clear_all()
+        if clear:
+            self.clear_all()
         n = 0
         for entry in entries:
             rec = self._from_har_entry(entry)
@@ -380,7 +441,7 @@ class CaptureStore:
         resource_type = (entry.get("_resourceType") or "other").upper()
         is_failed = bool(entry.get("_failed"))
 
-        return {
+        rec = {
             "url": url,
             "scheme": parsed.scheme,
             "host": host,
@@ -408,3 +469,11 @@ class CaptureStore:
             "timing": timing,
             "duration_ms": duration,
         }
+        # 读回本工具导出的标记字段（_note/_tags/_annotations）
+        if entry.get("_note"):
+            rec["note"] = entry["_note"]
+        if entry.get("_tags"):
+            rec["tags"] = entry["_tags"]
+        if entry.get("_annotations"):
+            rec["annotations"] = entry["_annotations"]
+        return rec

@@ -7,6 +7,7 @@
 """
 import base64
 import ctypes
+import json
 import os
 import socket
 import sys
@@ -142,6 +143,101 @@ def main():
                 except Exception as e:
                     return {"ok": False, "error": str(e)}
                 return {"ok": True, "path": path}
+
+            def save_to_path(self, path, content_b64):
+                """直接覆盖写入指定路径（不弹对话框），用于「保存」覆盖已打开的文件。"""
+                if not path:
+                    return {"ok": False, "error": "路径为空"}
+                try:
+                    data = base64.b64decode(content_b64)
+                except Exception:
+                    data = content_b64.encode("utf-8")
+                try:
+                    with open(path, "wb") as f:
+                        f.write(data)
+                except Exception as e:
+                    return {"ok": False, "error": str(e)}
+                return {"ok": True, "path": path}
+
+            def open_file(self):
+                """原生「打开文件」对话框：返回真实路径 + base64 内容，供前端导入并关联来源。"""
+                if not self._window:
+                    return {"ok": False, "error": "窗口未就绪"}
+                result = self._window.create_file_dialog(
+                    webview.OPEN_DIALOG,
+                    file_types=("HAR JSON files (*.har;*.json)",),
+                    allow_multiple=False,
+                )
+                if not result:
+                    return {"ok": False, "cancelled": True}
+                path = result[0] if isinstance(result, (list, tuple)) else result
+                try:
+                    with open(path, "rb") as f:
+                        data = f.read()
+                except Exception as e:
+                    return {"ok": False, "error": str(e)}
+                return {
+                    "ok": True,
+                    "path": path,
+                    "name": os.path.basename(path),
+                    "content_b64": base64.b64encode(data).decode(),
+                }
+
+            def import_files(self):
+                """桌面端「导入」：原生多选对话框拿到完整路径并读盘。
+
+                - 单文件导入时记录来源路径（之后「保存」可直接覆盖写回该文件）；
+                - 多文件合并时来源不唯一，不设来源（「保存」回退为另存为）。
+                - 复用服务端 _import_files 的解析/校验/两阶段原子导入逻辑。
+                """
+                if not self._window:
+                    return {"ok": False, "error": "窗口未就绪"}
+                result = self._window.create_file_dialog(
+                    webview.OPEN_DIALOG,
+                    file_types=("HAR JSON files (*.har;*.json)",),
+                    allow_multiple=True,
+                )
+                if not result:
+                    return {"ok": False, "cancelled": True}
+                paths = list(result) if isinstance(result, (list, tuple)) else [result]
+
+                mems = []
+                for p in paths:
+                    try:
+                        with open(p, "rb") as fh:
+                            data = fh.read()
+                    except Exception as e:
+                        return {"ok": False, "error": f"读取失败 {p}：{e}"}
+                    mems.append(_MemFile(os.path.basename(p), data))
+
+                from app.server import _import_files, USER_CONFIG, CONFIG_FILE
+
+                ok, resp, status = _import_files(mems)
+                if ok:
+                    if len(paths) == 1:
+                        sp = paths[0]
+                        state.store.source_path = sp
+                        try:
+                            cfg = USER_CONFIG
+                            cfg["last_source_har"] = sp
+                            with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
+                                json.dump(cfg, fh, ensure_ascii=False, indent=2)
+                        except Exception:
+                            pass
+                        resp["source_path"] = sp
+                    else:
+                        state.store.source_path = None
+                return {"ok": ok, "data": resp, "status": status}
+
+        class _MemFile:
+            """内存文件对象，模拟 flask FileStorage 的最小接口（供 _import_files 用）。"""
+
+            def __init__(self, filename, data):
+                self.filename = filename
+                self._d = data
+
+            def read(self):
+                return self._d
 
         api = RecorderApi()
         window = webview.create_window(

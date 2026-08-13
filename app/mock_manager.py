@@ -17,6 +17,9 @@ EXCLUDE_HEADERS = {
     "content-length", "content-encoding", "transfer-encoding", "connection",
 }
 
+# 处理记录（收到的请求 + 返回数据）最多保留条数，超出丢最旧
+MAX_MOCK_LOGS = 500
+
 
 def _norm(p):
     return p if p.startswith("/") else "/" + p
@@ -36,6 +39,10 @@ def _build_data():
             "method": r.get("method"),
             "path": r.get("path") or "",
             "query": r.get("query") or "",
+            "seq": r.get("seq"),
+            "note": r.get("note") or "",
+            "tags": r.get("tags") or [],
+            "url": r.get("url") or "",
             "response": {
                 "status": resp.get("status", 200),
                 "headers": resp.get("headers") or {},
@@ -64,13 +71,41 @@ def _make_app(data):
     def mock(path):
         m = find_match(request.method, "/" + path, request.query_string.decode("utf-8", "replace"))
         if not m:
-            return Response("", status=404, headers={"Content-Type": "text/plain; charset=utf-8"})
-        resp = m.get("response") or {}
-        body = resp.get("body") or ""
-        if not isinstance(body, str):
-            body = json.dumps(body, ensure_ascii=False)
-        headers = {k: v for k, v in (resp.get("headers") or {}).items() if k.lower() not in EXCLUDE_HEADERS}
-        return Response(body, status=resp.get("status", 200), headers=headers)
+            status = 404
+            body = ""
+            headers = {"Content-Type": "text/plain; charset=utf-8"}
+        else:
+            resp = m.get("response") or {}
+            body = resp.get("body") or ""
+            if not isinstance(body, str):
+                body = json.dumps(body, ensure_ascii=False)
+            headers = {k: v for k, v in (resp.get("headers") or {}).items() if k.lower() not in EXCLUDE_HEADERS}
+            status = resp.get("status", 200)
+
+        # 记录处理日志（收到的请求 + 返回数据），供界面点击查看
+        try:
+            from . import state
+            req_body = request.get_data(cache=True)
+            if isinstance(req_body, bytes):
+                req_body = req_body.decode("utf-8", "replace")
+            state.mock_manager.log_request({
+                "ts": time.time(),
+                "method": request.method,
+                "path": _norm(path) or "/",
+                "query": request.query_string.decode("utf-8", "replace"),
+                "url": request.url,
+                "matched": bool(m),
+                "status": status,
+                "req_headers": {k: v for k, v in request.headers.items()},
+                "req_body": req_body[:65536],
+                "res_headers": headers,
+                "res_body": body[:65536],
+            })
+            state.broadcast(json.dumps({"type": "mock_log"}, ensure_ascii=False))
+        except Exception:
+            pass
+
+        return Response(body, status=status, headers=headers)
 
     return app
 
@@ -83,7 +118,20 @@ class MockManager:
         self.host = "127.0.0.1"
         self.port = None
         self.data = []
+        self.logs = []  # 处理记录（最新追加，logs_list 倒序返回）
         self.started_at = None
+
+    def log_request(self, entry):
+        """追加一条处理记录；超出 MAX_MOCK_LOGS 丢最旧。"""
+        with self._lock:
+            self.logs.append(entry)
+            if len(self.logs) > MAX_MOCK_LOGS:
+                self.logs = self.logs[-MAX_MOCK_LOGS:]
+
+    def logs_list(self):
+        """返回处理记录（最新在前）。"""
+        with self._lock:
+            return list(reversed(self.logs))
 
     @property
     def running(self):
@@ -121,6 +169,7 @@ class MockManager:
             self._thread = t
             self.port = srv.server_address[1]
             self.data = data
+            self.logs = []
             self.started_at = time.time()
             return {"ok": True, "url": self._url(), "port": self.port, "count": len(data)}
 
@@ -140,6 +189,7 @@ class MockManager:
             self._thread = None
             self.port = None
             self.data = []
+            self.logs = []
             self.started_at = None
             return {"ok": True, "running": False}
 
@@ -164,6 +214,8 @@ class MockManager:
                     "path": r.get("path") or "",
                     "query": r.get("query") or "",
                     "status": (r.get("response") or {}).get("status", 200),
+                    "note": r.get("note") or "",
+                    "tags": r.get("tags") or [],
                 }
                 for r in self.data
             ]
