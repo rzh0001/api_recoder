@@ -32,3 +32,6 @@ build/
 *.swo
 Thumbs.db
 Desktop.ini
+
+# WorkBuddy 工作区记忆 / 内部数据（非项目代码，不同机器/会话差异大）
+.workbuddy/
