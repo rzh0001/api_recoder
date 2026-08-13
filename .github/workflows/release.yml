@@ -1,0 +1,68 @@
+name: Release
+
+# 自动发布：推送 v* 标签 或 手动触发 时，在 Windows runner 上用 Python 3.8 构建 PyInstaller 包，
+# 并作为 GitHub Release 资产上传。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag（如 v1.0.0；含 "-" 视为预发布）'
+        required: true
+        default: 'v0.0.0-dev'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows package
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller==5.13.2
+
+      - name: Build with PyInstaller
+        run: python packaging/build.py
+        # 产物位于 C:\api_recorder_build\dist\API_Recorder（onedir）
+
+      - name: Determine version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $ver = "${{ github.event.inputs.tag }}"
+          } else {
+            $ver = "${{ github.ref_name }}"
+          }
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $zip = "API_Recorder-$ver-win64.zip"
+          Compress-Archive -Path "C:\api_recorder_build\dist\API_Recorder" -DestinationPath $zip -Force
+          echo "zip=$zip" >> $env:GITHUB_ENV
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.zip }}
+          draft: false
+          prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
