@@ -691,8 +691,7 @@ function renderDetail(rec) {
   const hasBody = rec.response && rec.response.body != null;
   const head =
     `<div class="detail-head">` +
-    `<div class="detail-title">${esc(rec.method)} ${hl(rec.url)} <button class="btn-mini" data-copy-url title="复制完整请求地址">📋 复制</button></div>` +
-    `<div class="head-actions">` +
+    `<div class="detail-title">${esc(rec.method)} ${hl(rec.url)} <button class="btn-mini" data-copy-url title="复制完整请求地址">📋 复制</button>` +
     `<button class="btn-mini" id="editReqBtn" title="编辑请求（URL / 请求头 / 请求体），用于造数据">✏ 编辑请求</button>` +
     (hasBody ? `<button class="btn-mini" id="downloadFileBtn" title="将响应体另存为文件">⬇ 下载文件</button>` : "") +
     `<button class="btn-mini" id="delDetailBtn" title="删除该条录制记录">🗑 删除</button>` +

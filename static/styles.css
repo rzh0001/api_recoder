@@ -356,7 +356,6 @@ body {
 /* ---------- 详情 ---------- */
 .detail-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .detail-title { font-weight: 700; word-break: break-all; flex: 1 1 auto; min-width: 200px; }
-.head-actions { display: flex; gap: 6px; }
 .detail-meta { color: var(--muted); margin-top: 4px; font-size: 12px; width: 100%; }
 .detail-tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .tab { padding: 5px 10px; cursor: pointer; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; color: var(--muted); }
