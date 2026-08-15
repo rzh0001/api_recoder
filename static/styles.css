@@ -42,7 +42,7 @@ body {
   flex-wrap: wrap;
   position: relative;
 }
-.subbar { gap: 12px; align-items: stretch; }
+.subbar { gap: 12px; align-items: center; flex-wrap: wrap; }
 
 /* 功能区分区：API 录制 / Mock 服务 各自独立成框，避免挤在一起 */
 .zone {
@@ -560,9 +560,9 @@ mark.hl {
 .mock-apis-url { font-size: 12px; color: var(--muted); }
 .mock-apis-url a { color: var(--primary); text-decoration: none; word-break: break-all; }
 .mock-apis-url a:hover { text-decoration: underline; }
-.mock-api-list { max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+/* .mock-api-list 高度在下方 .mock-dash 规则中统一定义为 flex:1 占满剩余高度 */
 .mock-api-empty { padding: 16px; color: var(--muted); text-align: center; }
-/* 组内每行：query + 标记 + 状态 + 固定 + 测试（method 在组头展示） */
+/* 组内每行：query + 标记 + 状态 + 默认 + 测试（method 在组头展示） */
 .mock-api-row {
   display: flex;
   align-items: center;
@@ -639,11 +639,9 @@ mark.hl {
 }
 .mock-api-result.ok { border-left: 3px solid var(--green); }
 .mock-api-result.err { border-left: 3px solid var(--red); }
-.mock-apis-summary { margin-top: 10px; font-size: 12px; color: var(--muted); }
-
 /* ---- Mock 处理记录（收到的请求 + 返回数据）---- */
-.mock-logs { margin-top: 14px; display: flex; flex-direction: column; min-height: 0; }
-.mock-log-list { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 8px; min-height: 120px; max-height: 36vh; }
+.mock-logs { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 12px; gap: 10px; }
+.mock-log-list { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 8px; min-height: 0; }
 .mock-log-row {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 10px; border-bottom: 1px solid var(--border);
@@ -750,6 +748,12 @@ mark.hl {
 .sb-status.status-error { color: var(--red); }
 
 /* ---------- Mock tab 内联看板 ---------- */
-.mock-dash { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 12px; gap: 10px; }
-.mock-dash-head { display: flex; align-items: center; gap: 12px; }
+.mock-dash { flex: 2; display: flex; flex-direction: column; min-height: 0; padding: 12px; gap: 10px; }
+.mock-dash-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .mock-api-list { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 8px; min-height: 0; }
+/* 分组默认折叠，点击组头展开 */
+.mock-group-head { cursor: pointer; user-select: none; }
+.mock-group-head .expand-icon { margin-left: auto; font-size: 11px; color: var(--muted); transition: transform .15s; }
+.mock-group.expanded .expand-icon { transform: rotate(90deg); }
+.mock-group-body { display: none; }
+.mock-group.expanded .mock-group-body { display: block; }

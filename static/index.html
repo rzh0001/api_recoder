@@ -125,6 +125,7 @@
   <section class="tab-panel hide" id="panelMock">
     <div class="subbar">
       <label class="mock-port">端口 <input id="mockPortInput2" class="input input-sm" maxlength="6" placeholder="自动" /></label>
+      <span class="mock-apis-url">Mock 地址：<a id="mockApisUrl" href="#" target="_blank" rel="noopener">—</a></span>
       <button id="startMock" class="btn btn-primary">▶ 启动 Mock</button>
       <button id="stopMock" class="btn" disabled>■ 停止 Mock</button>
       <button id="mockRefreshBtn" class="btn">刷新列表</button>
@@ -133,7 +134,6 @@
     <main class="main">
       <div class="mock-dash">
         <div class="mock-dash-head">
-          <span class="mock-apis-url">Mock 地址：<a id="mockApisUrl" href="#" target="_blank" rel="noopener">—</a></span>
           <span id="mockApisCount" class="muted">(0)</span>
           <input id="mockSearch" class="input input-sm" style="width:210px" placeholder="过滤：方法/路径/备注/标签" />
           <select id="mockSort" class="input input-sm" style="width:auto">
@@ -141,15 +141,12 @@
             <option value="method">按方法</option>
             <option value="path">按路径</option>
             <option value="status">按状态码</option>
-            <option value="pin">已固定优先</option>
+            <option value="pin">已默认优先</option>
           </select>
-          <div class="spacer"></div>
-          <button id="mockTestAllBtn" class="btn btn-primary">全部测试</button>
         </div>
         <div id="mockApiList" class="mock-api-list">
           <div class="mock-api-empty">尚未启动 Mock 或无接口。</div>
         </div>
-        <div class="mock-apis-summary" id="mockApisSummary"></div>
       </div>
 
       <div class="mock-logs">

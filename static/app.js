@@ -297,13 +297,11 @@ function updateMockUI(info) {
 const mockApiList = $("mockApiList");
 const mockApisUrl = $("mockApisUrl");
 const mockApisCount = $("mockApisCount");
-const mockApisSummary = $("mockApisSummary");
 const mockSearch = $("mockSearch");
 const mockSort = $("mockSort");
 
 function loadMockApis() {
   mockApiList.innerHTML = `<div class="mock-api-empty">加载中…</div>`;
-  mockApisSummary.textContent = "";
   return postJSON("/api/mock/apis", {}).then((res) => {
     if (!res || !res.data) return;
     const d = res.data;
@@ -362,11 +360,12 @@ function renderMockApis(list) {
   mockApiList.innerHTML = groups.map((g) => {
     const pinnedCount = g.items.filter((x) => x.mock_pin).length;
     return `<div class="mock-group" data-group="${esc(g.key)}">
-      <div class="mock-group-head">
+      <div class="mock-group-head" title="点击展开/折叠">
         <span class="method-badge m-${String(g.method || "GET").toUpperCase()}">${esc(g.method || "GET")}</span>
         <span class="mock-group-path" title="${esc(g.path)}">${esc(g.path)}</span>
         <span class="mock-group-count">${g.items.length} 条</span>
-        ${pinnedCount ? `<span class="pin-badge">已固定 ${pinnedCount}</span>` : ""}
+        ${pinnedCount ? `<span class="pin-badge">已默认 ${pinnedCount}</span>` : ""}
+        <span class="expand-icon">▶</span>
       </div>
       <div class="mock-group-body">
         ${g.items.map((a) =>
@@ -374,7 +373,7 @@ function renderMockApis(list) {
             <span class="mock-api-q" title="query：${esc(a.query || "")}">${a.query ? esc(a.query) : "&lt;无 query&gt;"}</span>
             ${rowMarkHtml(a)}
             <span class="resp-badge">${esc(String(a.status))}</span>
-            <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}">${a.mock_pin ? "取消固定" : "固定"}</button>
+            <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}">${a.mock_pin ? "取消默认" : "默认"}</button>
             <button class="btn btn-sm mock-test-one">测试</button>
             <pre class="mock-api-result" style="display:none"></pre>
           </div>`
@@ -382,6 +381,14 @@ function renderMockApis(list) {
       </div>
     </div>`;
   }).join("");
+  // 点击组头展开/折叠
+  mockApiList.querySelectorAll(".mock-group-head").forEach((head) => {
+    head.addEventListener("click", (e) => {
+      // 如果点的是组头内的按钮（目前组头没有按钮，但防御一下）
+      if (e.target.closest("button")) return;
+      head.closest(".mock-group").classList.toggle("expanded");
+    });
+  });
   mockApiList.querySelectorAll(".mock-test-one").forEach((btn) => {
     btn.addEventListener("click", () => {
       const row = btn.closest(".mock-api-row");
@@ -398,13 +405,13 @@ function renderMockApis(list) {
 async function pinMockApi(api, btn) {
   if (!api) return;
   btn.disabled = true;
-  const target = !api.mock_pin;  // 切换固定态
+  const target = !api.mock_pin;  // 切换默认态
   const res = await postJSON("/api/mock/pin", { seq: api.seq, pinned: target });
   btn.disabled = false;
   if (res && res.data && res.data.ok) {
-    loadMockApis();  // 重新拉取，含最新固定状态（运行中已实时生效）
+    loadMockApis();  // 重新拉取，含最新默认状态（运行中已实时生效）
   } else {
-    alert("固定失败：" + ((res && res.data && res.data.error) || "未知错误"));
+    alert("设置默认失败：" + ((res && res.data && res.data.error) || "未知错误"));
   }
 }
 
@@ -433,44 +440,7 @@ async function testMockApi(api, row) {
   }
 }
 
-async function testAllMockApis() {
-  const rows = Array.from(mockApiList.querySelectorAll(".mock-api-row"));
-  if (!rows.length) return;
-  mockApisSummary.textContent = "测试中…";
-  let pass = 0, fail = 0;
-  const results = await Promise.all(rows.map(async (row) => {
-    const seq = row.getAttribute("data-seq");
-    const api = window.__mockApisBySeq ? window.__mockApisBySeq[seq] : null;
-    if (!api) return null;
-    const res = await postJSON("/api/mock/test", {
-      method: api.method, path: api.path, query: api.query,
-    });
-    const pre = row.querySelector(".mock-api-result");
-    const btn = row.querySelector(".mock-test-one");
-    if (res && res.data) {
-      const d = res.data;
-      if (d.ok && d.status < 400) pass++; else fail++;
-      let pretty = d.body || "";
-      if (pretty && (pretty.trim().startsWith("{") || pretty.trim().startsWith("["))) {
-        try { pretty = JSON.stringify(JSON.parse(pretty), null, 2); } catch (e) {}
-      }
-      const cls = d.ok ? (d.status < 400 ? "ok" : "err") : "err";
-      pre.className = "mock-api-result " + cls;
-      pre.style.display = "block";
-      pre.textContent = `状态 ${d.status} · ${d.ms}ms\n\n${pretty}`;
-      return d.ok && d.status < 400;
-    }
-    pre.className = "mock-api-result err";
-    pre.style.display = "block";
-    pre.textContent = "测试失败：无响应";
-    fail++;
-    return false;
-  }));
-  mockApisSummary.textContent = `全部测试完成：通过 ${pass} / 失败 ${fail} / 共 ${rows.length}`;
-}
-
 mockRefreshBtn.addEventListener("click", loadMockApis);
-$("mockTestAllBtn").addEventListener("click", testAllMockApis);
 if (mockSearch) mockSearch.addEventListener("input", applyMockFilterSort);
 if (mockSort) mockSort.addEventListener("change", applyMockFilterSort);
 
