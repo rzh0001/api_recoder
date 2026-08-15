@@ -58,6 +58,11 @@ def main():
     try:
         import webview
 
+        # 允许下载：否则 WebView2 的 on_download_starting 会直接 Cancel 下载，
+        # 导出（blob 下载）会静默失败且不弹窗。开启后浏览器下载会改走
+        # WebView2 的原生保存对话框（UI 线程触发，不经 js_api 线程，可靠）。
+        webview.settings["ALLOW_DOWNLOADS"] = True
+
         _icon = os.path.join(
             getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
             "static", "icon.ico",

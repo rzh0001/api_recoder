@@ -1094,14 +1094,17 @@ function saveTextFile(filename, text) {
   const blob = new Blob([text], { type: "application/octet-stream" });
   if (window.navigator.msSaveOrOpenBlob) {
     window.navigator.msSaveOrOpenBlob(blob, filename);
-    return Promise.resolve("已下载到默认位置");
+    return Promise.resolve(true);
   }
   const u = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = u; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(u), 1000);
-  return Promise.resolve("已下载到默认位置");
+  // 注意：blob 下载由 WebView2 拦截并弹出原生「保存」对话框（ALLOW_DOWNLOADS=true）。
+  // 用户在对话框里取消时 JS 无法感知，因此 saveTextFile 只表示「已触发下载」，
+  // 不谎报「已成功」，保存与否以对话框为准。
+  return Promise.resolve(true);
 }
 
 // ---------------- 打开 / 保存 ----------------
@@ -1130,7 +1133,7 @@ if (saveBtn) {
     fetch("/api/export?format=har")
       .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
       .then((text) => saveTextFile("api-recording.har", text))
-      .then(() => alert("已保存（下载到浏览器默认下载目录，文件名 api-recording.har）"))
+      .then(() => alert("已触发导出：请在弹出的「保存」窗口中选择位置并确认（默认文件名 api-recording.har）"))
       .catch((e) => alert("保存失败：" + e.message))
       .finally(() => { saveBtn.disabled = false; saveBtn.textContent = oldText; });
   });
@@ -1240,7 +1243,7 @@ function exportUrl(fmt) {
       return r.text();
     })
     .then((text) => saveTextFile(fmt === "har" ? "api-recording.har" : "api-recording.json", text))
-    .then((msg) => { if (msg) alert("已导出：" + msg); })
+    .then(() => alert("已触发导出：请在弹出的「保存」窗口中选择位置并确认（默认文件名 api-recording." + fmt + "）"))
     .catch((e) => { alert("导出失败：" + e.message); throw e; });
 }
 
@@ -1255,7 +1258,7 @@ function exportMockScript() {
       return r.text();
     })
     .then((text) => saveTextFile("mock_server.py", text))
-    .then((msg) => { if (msg) alert("已生成：" + msg + "\n\n运行：pip install flask && python mock_server.py --port 8080"); })
+    .then(() => alert("已生成 Mock 脚本：请在弹出的「保存」窗口中选择位置并确认（默认文件名 mock_server.py）\n\n运行：pip install flask && python mock_server.py --port 8080"))
     .catch((e) => { alert("生成失败：" + e.message); throw e; });
 }
 
