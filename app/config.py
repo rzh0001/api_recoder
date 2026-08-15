@@ -19,11 +19,12 @@ CHROMIUM_DIR = RUNTIME_DIR / "chromium"          # 自带内核下载目录
 USER_DATA_DIR = RUNTIME_DIR / "user_data"          # 浏览器用户数据目录
 STATIC_DIR = BASE_DIR / "static"                  # 冻结后由 PyInstaller 把 static 打进 _MEIPASS
 CONFIG_FILE = RUNTIME_DIR / "config.json"         # 用户持久化配置（端口等）
+EXPORT_DIR = Path.home() / "Downloads"            # 导出文件默认落盘目录
 
 # 随包捆绑、与 exe 同目录的运行时资源（仅打包版使用，开发期这些路径多半不存在）
 BUNDLED_CHROME = APP_DIR / "Chrome" / "chrome.exe"  # 随包捆绑的 Chrome（可选；不存在则回退系统浏览器）
 
-for _d in (RUNTIME_DIR, CHROMIUM_DIR, USER_DATA_DIR, STATIC_DIR):
+for _d in (RUNTIME_DIR, CHROMIUM_DIR, USER_DATA_DIR, STATIC_DIR, EXPORT_DIR):
     try:
         _d.mkdir(parents=True, exist_ok=True)
     except Exception:

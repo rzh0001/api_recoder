@@ -16,12 +16,7 @@ from flask_sock import Sock
 
 from . import state
 from .capture_store import _registered_domain
-from .config import HOST, PORT, MOCK_PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG, RUNTIME_DIR
-
-# 导出文件落盘目录（与 config.json 同级，稳定可找）。不再依赖 WebView2 的 blob 下载
-# —— 那条链路在部分环境下会静默不写盘。统一由后端写盘，前端拿到绝对路径。
-EXPORT_DIR = RUNTIME_DIR / "exports"
-EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+from .config import HOST, PORT, MOCK_PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG, EXPORT_DIR
 
 
 def resolve_port(preferred=None):
