@@ -615,6 +615,21 @@ mark.hl {
   background: #ffe08a; color: #854F0B; white-space: nowrap;
 }
 .btn-sm { padding: 3px 10px; font-size: 12px; }
+/* 导出结果 toast：固定在顶部居中，展示落盘的绝对路径并提供打开/复制 */
+.export-toast {
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 2000; display: flex; align-items: center; gap: 8px;
+  max-width: 90vw; padding: 10px 12px; border-radius: 8px;
+  background: var(--bg, #fff); color: var(--text, #1f2329);
+  border: 1px solid var(--border, #e3e6ea);
+  box-shadow: 0 6px 20px rgba(0,0,0,.15); font-size: 13px;
+}
+.export-toast.hide { display: none !important; }
+.export-toast-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export-toast-msg code {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  background: var(--code-bg, #f3f4f6); padding: 1px 5px; border-radius: 4px;
+}
 .mock-api-result {
   flex: 1 1 100%;
   margin: 4px 0 2px; padding: 8px;

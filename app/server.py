@@ -16,7 +16,12 @@ from flask_sock import Sock
 
 from . import state
 from .capture_store import _registered_domain
-from .config import HOST, PORT, MOCK_PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG
+from .config import HOST, PORT, MOCK_PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG, RUNTIME_DIR
+
+# 导出文件落盘目录（与 config.json 同级，稳定可找）。不再依赖 WebView2 的 blob 下载
+# —— 那条链路在部分环境下会静默不写盘。统一由后端写盘，前端拿到绝对路径。
+EXPORT_DIR = RUNTIME_DIR / "exports"
+EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def resolve_port(preferred=None):
@@ -404,6 +409,87 @@ def api_export():
     )
 
 
+def _export_content(fmt, desensitize, mask_cfg):
+    """生成导出文本内容，返回 (text, ext)。与 /api/export 共用生成逻辑。"""
+    if fmt == "json":
+        return json.dumps(
+            state.store.export_json(desensitize=desensitize, mask_cfg=mask_cfg), ensure_ascii=False
+        ), "json"
+    return json.dumps(
+        state.store.export_har(desensitize=desensitize, mask_cfg=mask_cfg), ensure_ascii=False
+    ), "har"
+
+
+def _save_export_file(text, filename):
+    """把文本写到 EXPORT_DIR（避免重名覆盖：已存在则追加序号），返回绝对路径。"""
+    dst = EXPORT_DIR / filename
+    if dst.exists():
+        stem, ext = os.path.splitext(filename)
+        i = 1
+        while (EXPORT_DIR / f"{stem}({i}){ext}").exists():
+            i += 1
+        dst = EXPORT_DIR / f"{stem}({i}){ext}"
+    dst.write_text(text, encoding="utf-8")
+    return str(dst.resolve())
+
+
+@app.post("/api/export/save")
+def api_export_save():
+    """导出并直接落盘到 EXPORT_DIR，返回绝对路径（可靠、不依赖 WebView2 下载）。"""
+    data = request.get_json(silent=True) or {}
+    fmt = (data.get("format") or "har").lower()
+    if fmt not in ("har", "json"):
+        return _json_err("format 仅支持 har / json", 400)
+    desensitize = bool(data.get("desensitize"))
+    mask_cfg = None
+    if desensitize:
+        mask_cfg = {}
+        for key in ("cjk", "digit", "alpha"):
+            v = data.get(key)
+            if v is not None and str(v) != "":
+                mask_cfg[key] = str(v)
+    text, ext = _export_content(fmt, desensitize, mask_cfg)
+    ts = _time.strftime("%Y%m%d-%H%M%S")
+    path = _save_export_file(text, f"api-recording-{ts}.{ext}")
+    return Response(json.dumps({"ok": True, "path": path}, ensure_ascii=False), mimetype="application/json")
+
+
+@app.post("/api/open")
+def api_open():
+    """在资源管理器中打开并选中指定文件。仅允许 EXPORT_DIR 内，防止越权打开任意路径。"""
+    data = request.get_json(silent=True) or {}
+    path = data.get("path") or ""
+    try:
+        p = Path(path).resolve()
+    except Exception:
+        return _json_err("路径无效", 400)
+    if p.parent != EXPORT_DIR.resolve() or not p.exists():
+        return _json_err("只能打开导出目录内的文件", 400)
+    try:
+        os.startfile(str(p)) if hasattr(os, "startfile") else _subprocess_explorer(p)
+        return Response(json.dumps({"ok": True}, ensure_ascii=False), mimetype="application/json")
+    except Exception as e:
+        return _json_err(f"打开失败：{e}", 500)
+
+
+def _subprocess_explorer(p):
+    import subprocess
+    subprocess.Popen(["explorer", "/select,", str(p)])
+
+
+@app.post("/api/file/save")
+def api_file_save():
+    """把任意文本/二进制内容（如单条响应体「下载文件」）落盘到 EXPORT_DIR，返回绝对路径。"""
+    data = request.get_json(silent=True) or {}
+    content = data.get("content")
+    if content is None:
+        return _json_err("缺少 content", 400)
+    filename = (data.get("filename") or "download.txt").replace("\\", "_").replace("/", "_")
+    # 内容可能含非 BMP 字符，统一以 utf-8 写文本
+    path = _save_export_file(str(content), filename)
+    return Response(json.dumps({"ok": True, "path": path}, ensure_ascii=False), mimetype="application/json")
+
+
 # ---------------- 导出 Mock 服务器脚本 ----------------
 MOCK_TEMPLATE = r'''#!/usr/bin/env python
 # -*- coding: utf-8 -*-
@@ -503,6 +589,19 @@ def api_export_mock():
         mimetype="text/x-python",
         headers={"Content-Disposition": 'attachment; filename="mock_server.py"'},
     )
+
+
+@app.post("/api/export_mock/save")
+def api_export_mock_save():
+    """生成 Mock 脚本并落盘到 EXPORT_DIR，返回绝对路径。"""
+    records = _mock_records()
+    if not records:
+        return _json_err("没有可模拟的 API 录制（仅 XHR/FETCH 类型会被导出，请先录制接口调用）", 400)
+    data_json = json.dumps(records, ensure_ascii=False)
+    script = MOCK_TEMPLATE.replace("__DATA__", data_json)
+    ts = _time.strftime("%Y%m%d-%H%M%S")
+    path = _save_export_file(script, f"mock_server-{ts}.py")
+    return Response(json.dumps({"ok": True, "path": path}, ensure_ascii=False), mimetype="application/json")
 
 
 # ---------------- 进程内 Mock 服务（点按钮直接起，无需导出脚本） ----------------

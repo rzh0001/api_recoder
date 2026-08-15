@@ -828,9 +828,7 @@ function renderDetail(rec) {
       }
       const filename = seg;
 
-      // 统一走 saveTextFile（原生保存对话框，与导出 HAR/JSON/Mock 一致）
-      saveTextFile(filename, body)
-        .then((msg) => { if (msg) alert("已保存：" + msg); })
+      downloadFileSave(filename, body)
         .catch((e) => alert("下载失败：" + e.message))
         .finally(() => { dlBtn.disabled = false; dlBtn.textContent = oldText; });
     });
@@ -1087,24 +1085,82 @@ function postJSON(url, body) {
   }).then((r) => r.json().then((d) => ({ ok: r.ok, data: d })));
 }
 
-// 统一的「保存文件」逻辑：浏览器原生下载（WebView2/Chromium 与 IE11 均可靠），
-// 不再依赖 pywebview 原生保存对话框（在 js_api 工作线程中静默失败，且 WebView2 后端未实现）。
-// 所有导出（HAR / JSON / Mock）与「保存」都走它，避免各写一套。
-function saveTextFile(filename, text) {
-  const blob = new Blob([text], { type: "application/octet-stream" });
-  if (window.navigator.msSaveOrOpenBlob) {
-    window.navigator.msSaveOrOpenBlob(blob, filename);
-    return Promise.resolve(true);
+// 导出统一改为「后端写盘到 runtime/exports」：可靠、不依赖 WebView2 的 blob 下载
+// （那条链路在部分环境下会静默不写盘，且无可见反馈）。后端把文件写到磁盘并返回
+// 绝对路径，前端用 toast 提示并提供「打开文件夹」（/api/open 在资源管理器选中文件）
+// 与「复制路径」。
+function showExportToast(path) {
+  const toast = $("exportToast");
+  if (!toast) return;
+  toast.innerHTML =
+    `<span class="export-toast-msg">已导出：<code>${esc(path)}</code></span>` +
+    `<button class="btn btn-sm" id="exportOpenBtn">打开文件夹</button>` +
+    `<button class="btn btn-sm" id="exportCopyBtn">复制路径</button>` +
+    `<button class="btn btn-sm" id="exportToastClose">×</button>`;
+  toast.classList.remove("hide");
+  $("exportToastClose").addEventListener("click", () => toast.classList.add("hide"));
+  $("exportOpenBtn").addEventListener("click", () => {
+    postJSON("/api/open", { path }).then((r) => {
+      if (!r.ok || !r.data.ok) alert("打开失败：" + ((r.data && r.data.error) || "未知错误"));
+    }).catch((e) => alert("打开失败：" + e));
+  });
+  $("exportCopyBtn").addEventListener("click", () => {
+    const t = path;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(() => alert("已复制路径")).catch(() => fallbackCopy(t));
+    } else {
+      fallbackCopy(t);
+    }
+  });
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text; document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); alert("已复制路径"); }
+  catch (e) { alert("复制失败：" + text); }
+  ta.remove();
+}
+
+function exportSave(fmt) {
+  const body = { format: fmt };
+  if (desensitizeEl.checked) {
+    body.desensitize = 1;
+    const cjk = maskCjkEl.value.trim();
+    const digit = maskDigitEl.value.trim();
+    const alpha = maskAlphaEl.value.trim();
+    if (cjk) body.cjk = cjk;
+    if (digit) body.digit = digit;
+    if (alpha) body.alpha = alpha;
   }
-  const u = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = u; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(u), 1000);
-  // 注意：blob 下载由 WebView2 拦截并弹出原生「保存」对话框（ALLOW_DOWNLOADS=true）。
-  // 用户在对话框里取消时 JS 无法感知，因此 saveTextFile 只表示「已触发下载」，
-  // 不谎报「已成功」，保存与否以对话框为准。
-  return Promise.resolve(true);
+  return postJSON("/api/export/save", body).then((r) => {
+    if (r.ok && r.data && r.data.ok) {
+      showExportToast(r.data.path);
+    } else {
+      alert("导出失败：" + ((r.data && r.data.error) || "未知错误"));
+    }
+  }).catch((e) => alert("导出失败：" + e));
+}
+
+function exportMockSave() {
+  return postJSON("/api/export_mock/save", {}).then((r) => {
+    if (r.ok && r.data && r.data.ok) {
+      showExportToast(r.data.path);
+    } else {
+      alert("生成失败：" + ((r.data && r.data.error) || "未知错误"));
+    }
+  }).catch((e) => alert("生成失败：" + e));
+}
+
+// 详情区「下载文件」：把单条响应体落盘到 EXPORT_DIR，与导出走同一套可靠路径
+function downloadFileSave(filename, content) {
+  return postJSON("/api/file/save", { filename, content }).then((r) => {
+    if (r.ok && r.data && r.data.ok) {
+      showExportToast(r.data.path);
+    } else {
+      alert("下载失败：" + ((r.data && r.data.error) || "未知错误"));
+    }
+  }).catch((e) => alert("下载失败：" + e));
 }
 
 // ---------------- 打开 / 保存 ----------------
@@ -1130,11 +1186,8 @@ if (saveBtn) {
     saveBtn.disabled = true;
     const oldText = saveBtn.textContent;
     saveBtn.textContent = "保存中…";
-    fetch("/api/export?format=har")
-      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
-      .then((text) => saveTextFile("api-recording.har", text))
-      .then(() => alert("已触发导出：请在弹出的「保存」窗口中选择位置并确认（默认文件名 api-recording.har）"))
-      .catch((e) => alert("保存失败：" + e.message))
+    exportSave("har")
+      .catch((e) => alert("保存失败：" + e))
       .finally(() => { saveBtn.disabled = false; saveBtn.textContent = oldText; });
   });
 }
@@ -1226,39 +1279,13 @@ fetch("/api/config").then((r) => r.json()).then((d) => {
 }).catch(() => {});
 
 function exportUrl(fmt) {
-  let q = "format=" + fmt;
-  if (desensitizeEl.checked) {
-    q += "&desensitize=1";
-    const cjk = maskCjkEl.value.trim();
-    const digit = maskDigitEl.value.trim();
-    const alpha = maskAlphaEl.value.trim();
-    if (cjk) q += "&cjk=" + encodeURIComponent(cjk);
-    if (digit) q += "&digit=" + encodeURIComponent(digit);
-    if (alpha) q += "&alpha=" + encodeURIComponent(alpha);
-  }
-  // 与「下载 JS」统一：fetch 内容后用原生保存对话框写盘，不再依赖浏览器自带下载
-  return fetch("/api/export?" + q)
-    .then((r) => {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.text();
-    })
-    .then((text) => saveTextFile(fmt === "har" ? "api-recording.har" : "api-recording.json", text))
-    .then(() => alert("已触发导出：请在弹出的「保存」窗口中选择位置并确认（默认文件名 api-recording." + fmt + "）"))
+  return exportSave(fmt)
     .catch((e) => { alert("导出失败：" + e.message); throw e; });
 }
 
-// 导出 Mock 脚本：拉取生成的 Python 脚本，统一走 saveTextFile
+// 导出 Mock 脚本：生成并落盘到 EXPORT_DIR
 function exportMockScript() {
-  return fetch("/api/export_mock")
-    .then((r) => {
-      if (!r.ok) {
-        return r.json().then((e) => { throw new Error(e.error || ("HTTP " + r.status)); })
-          .catch(() => { throw new Error("HTTP " + r.status); });
-      }
-      return r.text();
-    })
-    .then((text) => saveTextFile("mock_server.py", text))
-    .then(() => alert("已生成 Mock 脚本：请在弹出的「保存」窗口中选择位置并确认（默认文件名 mock_server.py）\n\n运行：pip install flask && python mock_server.py --port 8080"))
+  return exportMockSave()
     .catch((e) => { alert("生成失败：" + e.message); throw e; });
 }
 
