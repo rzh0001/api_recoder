@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""验证 Mock「固定返回某一条」功能：同一 API 多条记录时，固定项优先返回。"""
+"""验证 Mock「固定返回某一条」功能：精确到 (method, path, query)，不同 query 互不干扰。"""
 import json
 
 from app import state, server
@@ -26,43 +26,46 @@ def main():
     state.store.clear_all()
     s1 = state.store.add(make_rec("GET", "/api/x", "", json.dumps({"v": 1})))
     s2 = state.store.add(make_rec("GET", "/api/x", "", json.dumps({"v": 2})))
+    s3 = state.store.add(make_rec("GET", "/api/x", "a=9", json.dumps({"v": 3})))
     state.store.add(make_rec("GET", "/api/y", "", json.dumps({"y": 1})))
 
     r = state.mock_manager.start()
     assert r.get("ok"), r
-    print("start:", r)
 
     client = server.app.test_client()
 
-    # 默认（未固定）：返回最早录制的那条 s1 (v:1)
+    # 默认：query "" 返回最早 s1(v:1)；query "a=9" 返回 s3(v:3)
     d = client.post("/api/mock/test", json={"method": "GET", "path": "/api/x", "query": ""}).get_json()
-    print("默认返回:", d["body"])
     assert '"v": 1' in d["body"], d["body"]
+    d_a9 = client.post("/api/mock/test", json={"method": "GET", "path": "/api/x", "query": "a=9"}).get_json()
+    assert '"v": 3' in d_a9["body"], d_a9["body"]
 
-    # 固定 s2
+    # 固定 s2（query ""）：同 query 返回 s2(v:2)，不同 query 不受影响（仍 s3 v:3）
     pr = client.post("/api/mock/pin", json={"seq": s2, "pinned": True}).get_json()
-    print("pin s2:", pr)
     assert pr.get("ok")
-
-    # 固定后：返回 s2 (v:2)
     d2 = client.post("/api/mock/test", json={"method": "GET", "path": "/api/x", "query": ""}).get_json()
-    print("固定后返回:", d2["body"])
     assert '"v": 2' in d2["body"], d2["body"]
-
-    # 不同 query 也应命中固定项（按 method+path 固定）
     d2b = client.post("/api/mock/test", json={"method": "GET", "path": "/api/x", "query": "a=9"}).get_json()
-    assert '"v": 2' in d2b["body"], d2b["body"]
+    assert '"v": 3' in d2b["body"], d2b["body"]  # 关键：不同 query 不被覆盖
 
-    # /api/mock/apis 应反映固定态：仅 s2 被标记
+    # /api/mock/apis 反映固定态：仅 s2 被标记；且透出 seq/query/mock_pin 供前端分组
     apis = client.get("/api/mock/apis").get_json()["apis"]
     pinned = [a["seq"] for a in apis if a["mock_pin"]]
-    print("固定项 seq:", pinned)
     assert pinned == [s2], pinned
+    for a in apis:
+        assert "seq" in a and "query" in a and "mock_pin" in a
 
-    # 取消固定：回到默认（最早 s1）
+    # 取消固定 s2：query "" 回到 s1(v:1)
     client.post("/api/mock/pin", json={"seq": s2, "pinned": False})
     d3 = client.post("/api/mock/test", json={"method": "GET", "path": "/api/x", "query": ""}).get_json()
     assert '"v": 1' in d3["body"], d3["body"]
+
+    # 固定 s3（query a=9）：query a=9 返回 s3(v:3)，query "" 不受影响（s1 v:1）
+    client.post("/api/mock/pin", json={"seq": s3, "pinned": True})
+    d4 = client.post("/api/mock/test", json={"method": "GET", "path": "/api/x", "query": "a=9"}).get_json()
+    assert '"v": 3' in d4["body"], d4["body"]
+    d4b = client.post("/api/mock/test", json={"method": "GET", "path": "/api/x", "query": ""}).get_json()
+    assert '"v": 1' in d4b["body"], d4b["body"]
 
     state.mock_manager.stop()
     print("ALL PASS")

@@ -346,18 +346,42 @@ function renderMockApis(list) {
     mockApiList.innerHTML = `<div class="mock-api-empty">${total ? "无匹配接口（试试调整过滤词）。" : "尚无接口（仅 XHR/FETCH 类型会被模拟）。"}</div>`;
     return;
   }
-  mockApiList.innerHTML = list.map((a, i) =>
-    `<div class="mock-api-row${a.mock_pin ? " pinned" : ""}" data-i="${i}" data-seq="${a.seq}">
-      <span class="method-badge m-${String(a.method || "GET").toUpperCase()}">${esc(a.method || "GET")}</span>
-      <span class="mock-api-path" title="${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}">${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}</span>
-      ${rowMarkHtml(a)}
-      <span class="resp-badge">${esc(String(a.status))}</span>
-      ${a.mock_pin ? '<span class="pin-badge">已固定</span>' : ""}
-      <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}">${a.mock_pin ? "取消固定" : "固定"}</button>
-      <button class="btn btn-sm mock-test-one">测试</button>
-      <pre class="mock-api-result" style="display:none"></pre>
-    </div>`
-  ).join("");
+  // 按 (method, path) 分组，组内列出多条记录（不同 query / 不同响应）
+  const groups = [];
+  const gmap = new Map();
+  list.forEach((a) => {
+    const gk = (a.method || "GET").toUpperCase() + " " + a.path;
+    let g = gmap.get(gk);
+    if (!g) {
+      g = { key: gk, method: a.method || "GET", path: a.path || "", items: [] };
+      gmap.set(gk, g);
+      groups.push(g);
+    }
+    g.items.push(a);
+  });
+  mockApiList.innerHTML = groups.map((g) => {
+    const pinnedCount = g.items.filter((x) => x.mock_pin).length;
+    return `<div class="mock-group" data-group="${esc(g.key)}">
+      <div class="mock-group-head">
+        <span class="method-badge m-${String(g.method || "GET").toUpperCase()}">${esc(g.method || "GET")}</span>
+        <span class="mock-group-path" title="${esc(g.path)}">${esc(g.path)}</span>
+        <span class="mock-group-count">${g.items.length} 条</span>
+        ${pinnedCount ? `<span class="pin-badge">已固定 ${pinnedCount}</span>` : ""}
+      </div>
+      <div class="mock-group-body">
+        ${g.items.map((a) =>
+          `<div class="mock-api-row${a.mock_pin ? " pinned" : ""}" data-seq="${a.seq}">
+            <span class="mock-api-q" title="query：${esc(a.query || "")}">${a.query ? esc(a.query) : "&lt;无 query&gt;"}</span>
+            ${rowMarkHtml(a)}
+            <span class="resp-badge">${esc(String(a.status))}</span>
+            <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}">${a.mock_pin ? "取消固定" : "固定"}</button>
+            <button class="btn btn-sm mock-test-one">测试</button>
+            <pre class="mock-api-result" style="display:none"></pre>
+          </div>`
+        ).join("")}
+      </div>
+    </div>`;
+  }).join("");
   mockApiList.querySelectorAll(".mock-test-one").forEach((btn) => {
     btn.addEventListener("click", () => {
       const row = btn.closest(".mock-api-row");

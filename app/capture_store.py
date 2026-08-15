@@ -185,17 +185,17 @@ class CaptureStore:
             return True
 
     def set_pin(self, seq, pinned):
-        """固定/取消固定某条记录作为 Mock 返回。同一 (method, path) 下只保留一个固定项
-        （以「同一个 API」= method+path 为粒度，忽略 query，符合「固定返回哪一条」的语义）。
+        """固定/取消固定某条记录作为 Mock 返回。以「同一个 API 请求」= (method, path, query)
+        为粒度（精确到 query），因此同一 API 的不同 query 可分别固定、互不干扰。
         返回是否成功（记录存在）。"""
         with self._lock:
             rec = self.by_seq.get(seq)
             if rec is None:
                 return False
-            key = ((rec.get("method") or "").upper(), _norm(rec.get("path") or ""))
+            key = ((rec.get("method") or "").upper(), _norm(rec.get("path") or ""), (rec.get("query") or ""))
             if pinned:
                 for other in self.requests:
-                    if ((other.get("method") or "").upper(), _norm(other.get("path") or "")) == key:
+                    if ((other.get("method") or "").upper(), _norm(other.get("path") or ""), (other.get("query") or "")) == key:
                         if other is rec:
                             other["mock_pin"] = True
                         else:

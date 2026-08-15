@@ -562,18 +562,41 @@ mark.hl {
 .mock-apis-url a:hover { text-decoration: underline; }
 .mock-api-list { max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
 .mock-api-empty { padding: 16px; color: var(--muted); text-align: center; }
+/* 组内每行：query + 标记 + 状态 + 固定 + 测试（method 在组头展示） */
 .mock-api-row {
-  display: grid;
-  grid-template-columns: 56px 1fr auto auto auto auto auto;
+  display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
   padding: 7px 10px;
   border-bottom: 1px solid var(--border);
 }
 .mock-api-row.pinned { background: #fff7e6; box-shadow: inset 3px 0 0 #e08a00; }
 .mock-api-row .row-mark { margin-left: 0; max-width: 220px; }
 .mock-api-row:last-child { border-bottom: none; }
+.mock-api-q {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 12px; color: var(--muted);
+  flex: 1 1 140px; min-width: 120px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .mock-api-path { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 按 API（method+path）分组展示 */
+.mock-group { border-bottom: 1px solid var(--border); }
+.mock-group:last-child { border-bottom: none; }
+.mock-group-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; background: var(--panel);
+  position: sticky; top: 0; z-index: 1; font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.mock-group-path {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 12px; flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mock-group-count { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .method-badge {
   font-size: 11px; font-weight: 700; text-align: center; border-radius: 4px; padding: 2px 0; color: #fff;
 }
@@ -593,7 +616,7 @@ mark.hl {
 }
 .btn-sm { padding: 3px 10px; font-size: 12px; }
 .mock-api-result {
-  grid-column: 1 / -1;
+  flex: 1 1 100%;
   margin: 4px 0 2px; padding: 8px;
   background: var(--code-bg); border-radius: 6px;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;

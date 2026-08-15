@@ -60,16 +60,18 @@ def _make_app(manager):
     def find_match(method, path, query_str):
         data = manager.data  # 每次请求动态读取，rebuild() 重新赋值后才能实时生效
         path = _norm(path)
-        # 优先返回被「固定(pin)」的记录（与未固定时保持一致的两级匹配：精确 query → 仅 method+path）
+        # 固定精确到 (method+path+query)：不同 query 互不干扰，可分别固定不同响应。
         for r in data:
-            if r.get("mock_pin") and r.get("method") == method and _norm(r.get("path", "")) == path and (r.get("query") or "") == query_str:
+            if (r.get("mock_pin") and r.get("method") == method
+                    and _norm(r.get("path", "")) == path
+                    and (r.get("query") or "") == query_str):
                 return r
+        # 普通 first 精确 (method+path+query)
         for r in data:
-            if r.get("mock_pin") and r.get("method") == method and _norm(r.get("path", "")) == path:
+            if (r.get("method") == method and _norm(r.get("path", "")) == path
+                    and (r.get("query") or "") == query_str):
                 return r
-        for r in data:
-            if r.get("method") == method and _norm(r.get("path", "")) == path and (r.get("query") or "") == query_str:
-                return r
+        # 回退 method+path（无精确 query 录制时，保持原行为；向后兼容）
         for r in data:
             if r.get("method") == method and _norm(r.get("path", "")) == path:
                 return r
