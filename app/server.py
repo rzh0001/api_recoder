@@ -644,6 +644,28 @@ def api_mock_test():
         )
 
 
+@app.post("/api/mock/pin")
+def api_mock_pin():
+    """固定/取消固定某条记录作为 Mock 返回（同一 method+path 只保留一个固定项）。
+    请求体：{"seq": 12, "pinned": true}。运行中时实时重建匹配表，未运行时仅记录标记、下次启动生效。"""
+    data = request.get_json(silent=True) or {}
+    seq = data.get("seq")
+    pinned = bool(data.get("pinned"))
+    if not isinstance(seq, int):
+        return Response(
+            json.dumps({"ok": False, "error": "seq 无效"}, ensure_ascii=False),
+            status=400, mimetype="application/json",
+        )
+    ok = state.store.set_pin(seq, pinned)
+    if not ok:
+        return Response(
+            json.dumps({"ok": False, "error": "记录不存在"}, ensure_ascii=False),
+            status=400, mimetype="application/json",
+        )
+    state.mock_manager.rebuild()
+    return Response(json.dumps({"ok": True}, ensure_ascii=False), mimetype="application/json")
+
+
 def _import_files(files):
     """公共导入逻辑（多文件 / 单文件 / base64 打开共用）：
     两阶段原子导入——先全部解析+格式识别+结构校验（不碰 store），

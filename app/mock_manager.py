@@ -42,6 +42,7 @@ def _build_data():
             "seq": r.get("seq"),
             "note": r.get("note") or "",
             "tags": r.get("tags") or [],
+            "mock_pin": bool(r.get("mock_pin")),
             "url": r.get("url") or "",
             "response": {
                 "status": resp.get("status", 200),
@@ -52,12 +53,20 @@ def _build_data():
     return out
 
 
-def _make_app(data):
+def _make_app(manager):
     app = Flask("mock")
     app.url_map.strict_slashes = False
 
     def find_match(method, path, query_str):
+        data = manager.data  # 每次请求动态读取，rebuild() 重新赋值后才能实时生效
         path = _norm(path)
+        # 优先返回被「固定(pin)」的记录（与未固定时保持一致的两级匹配：精确 query → 仅 method+path）
+        for r in data:
+            if r.get("mock_pin") and r.get("method") == method and _norm(r.get("path", "")) == path and (r.get("query") or "") == query_str:
+                return r
+        for r in data:
+            if r.get("mock_pin") and r.get("method") == method and _norm(r.get("path", "")) == path:
+                return r
         for r in data:
             if r.get("method") == method and _norm(r.get("path", "")) == path and (r.get("query") or "") == query_str:
                 return r
@@ -137,6 +146,13 @@ class MockManager:
     def running(self):
         return self._srv is not None
 
+    def rebuild(self):
+        """运行中时按最新录制库重建匹配表（固定/取消固定后实时生效）。未运行时为空操作。"""
+        with self._lock:
+            if not self.running:
+                return
+            self.data = _build_data()
+
     def start(self, port=None):
         with self._lock:
             if self.running:
@@ -150,7 +166,7 @@ class MockManager:
                     "ok": False,
                     "error": "没有可模拟的 API 录制（仅 XHR/FETCH 类型会被模拟，请先录制接口调用）",
                 }
-            app = _make_app(data)
+            app = _make_app(self)
             # 优先用请求端口；占用或为空时回退到系统分配空闲端口(0)
             candidates = [port] if port else []
             candidates.append(0)
@@ -213,6 +229,8 @@ class MockManager:
                     "method": r.get("method"),
                     "path": r.get("path") or "",
                     "query": r.get("query") or "",
+                    "seq": r.get("seq"),
+                    "mock_pin": bool(r.get("mock_pin")),
                     "status": (r.get("response") or {}).get("status", 200),
                     "note": r.get("note") or "",
                     "tags": r.get("tags") or [],

@@ -315,11 +315,13 @@ function loadMockApis() {
       return;
     }
     mockApiList.innerHTML = apis.map((a, i) =>
-      `<div class="mock-api-row" data-i="${i}">
+      `<div class="mock-api-row${a.mock_pin ? " pinned" : ""}" data-i="${i}">
         <span class="method-badge m-${String(a.method || "GET").toUpperCase()}">${esc(a.method || "GET")}</span>
         <span class="mock-api-path" title="${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}">${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}</span>
         ${rowMarkHtml(a)}
         <span class="resp-badge">${esc(String(a.status))}</span>
+        ${a.mock_pin ? '<span class="pin-badge">已固定</span>' : ""}
+        <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}">${a.mock_pin ? "取消固定" : "固定"}</button>
         <button class="btn btn-sm mock-test-one">测试</button>
         <pre class="mock-api-result" style="display:none"></pre>
       </div>`
@@ -332,7 +334,28 @@ function loadMockApis() {
         testMockApi(apis[i], row);
       });
     });
+    // 绑定每行固定/取消固定按钮
+    mockApiList.querySelectorAll(".mock-pin-one").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const row = btn.closest(".mock-api-row");
+        const i = parseInt(row.getAttribute("data-i"), 10);
+        pinMockApi(apis[i], btn);
+      });
+    });
   });
+}
+
+async function pinMockApi(api, btn) {
+  if (!api) return;
+  btn.disabled = true;
+  const target = !api.mock_pin;  // 切换固定态
+  const res = await postJSON("/api/mock/pin", { seq: api.seq, pinned: target });
+  btn.disabled = false;
+  if (res && res.data && res.data.ok) {
+    loadMockApis();  // 重新拉取，含最新固定状态（运行中已实时生效）
+  } else {
+    alert("固定失败：" + ((res && res.data && res.data.error) || "未知错误"));
+  }
 }
 
 async function testMockApi(api, row) {
