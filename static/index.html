@@ -135,6 +135,14 @@
         <div class="mock-dash-head">
           <span class="mock-apis-url">Mock 地址：<a id="mockApisUrl" href="#" target="_blank" rel="noopener">—</a></span>
           <span id="mockApisCount" class="muted">(0)</span>
+          <input id="mockSearch" class="input input-sm" style="width:210px" placeholder="过滤：方法/路径/备注/标签" />
+          <select id="mockSort" class="input input-sm" style="width:auto">
+            <option value="default">默认顺序</option>
+            <option value="method">按方法</option>
+            <option value="path">按路径</option>
+            <option value="status">按状态码</option>
+            <option value="pin">已固定优先</option>
+          </select>
           <div class="spacer"></div>
           <button id="mockTestAllBtn" class="btn btn-primary">全部测试</button>
         </div>

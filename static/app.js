@@ -298,6 +298,8 @@ const mockApiList = $("mockApiList");
 const mockApisUrl = $("mockApisUrl");
 const mockApisCount = $("mockApisCount");
 const mockApisSummary = $("mockApisSummary");
+const mockSearch = $("mockSearch");
+const mockSort = $("mockSort");
 
 function loadMockApis() {
   mockApiList.innerHTML = `<div class="mock-api-empty">加载中…</div>`;
@@ -309,38 +311,62 @@ function loadMockApis() {
     mockApisUrl.href = d.url || "#";
     const apis = d.apis || [];
     window.__mockApis = apis;
-    mockApisCount.textContent = `(${apis.length})`;
-    if (!apis.length) {
-      mockApiList.innerHTML = `<div class="mock-api-empty">尚无接口（仅 XHR/FETCH 类型会被模拟）。</div>`;
-      return;
-    }
-    mockApiList.innerHTML = apis.map((a, i) =>
-      `<div class="mock-api-row${a.mock_pin ? " pinned" : ""}" data-i="${i}">
-        <span class="method-badge m-${String(a.method || "GET").toUpperCase()}">${esc(a.method || "GET")}</span>
-        <span class="mock-api-path" title="${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}">${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}</span>
-        ${rowMarkHtml(a)}
-        <span class="resp-badge">${esc(String(a.status))}</span>
-        ${a.mock_pin ? '<span class="pin-badge">已固定</span>' : ""}
-        <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}">${a.mock_pin ? "取消固定" : "固定"}</button>
-        <button class="btn btn-sm mock-test-one">测试</button>
-        <pre class="mock-api-result" style="display:none"></pre>
-      </div>`
-    ).join("");
-    // 绑定每行测试按钮
-    mockApiList.querySelectorAll(".mock-test-one").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const row = btn.closest(".mock-api-row");
-        const i = parseInt(row.getAttribute("data-i"), 10);
-        testMockApi(apis[i], row);
-      });
+    window.__mockApisBySeq = {};
+    apis.forEach((a) => { window.__mockApisBySeq[a.seq] = a; });
+    applyMockFilterSort();
+  });
+}
+
+// 过滤（按方法/路径/备注/标签多词匹配）+ 排序，再渲染
+function applyMockFilterSort() {
+  const apis = window.__mockApis || [];
+  mockApisCount.textContent = `(${apis.length})`;
+  const q = ((mockSearch && mockSearch.value) || "").trim().toLowerCase();
+  const tokens = q ? q.split(/[\s|]+/).map((t) => t.trim()).filter(Boolean) : [];
+  let list = apis;
+  if (tokens.length) {
+    list = apis.filter((a) => {
+      const hay = [a.method, a.path, a.query, a.note, (a.tags || []).join(" "), a.status].join(" ").toLowerCase();
+      return tokens.every((t) => hay.indexOf(t) !== -1);
     });
-    // 绑定每行固定/取消固定按钮
-    mockApiList.querySelectorAll(".mock-pin-one").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const row = btn.closest(".mock-api-row");
-        const i = parseInt(row.getAttribute("data-i"), 10);
-        pinMockApi(apis[i], btn);
-      });
+  }
+  const sort = (mockSort && mockSort.value) || "default";
+  list = list.slice();
+  if (sort === "method") list.sort((a, b) => String(a.method).localeCompare(String(b.method)));
+  else if (sort === "path") list.sort((a, b) => String(a.path).localeCompare(String(b.path)));
+  else if (sort === "status") list.sort((a, b) => (Number(a.status) || 0) - (Number(b.status) || 0));
+  else if (sort === "pin") list.sort((a, b) => (b.mock_pin ? 1 : 0) - (a.mock_pin ? 1 : 0));
+  renderMockApis(list);
+  return list;
+}
+
+function renderMockApis(list) {
+  if (!list.length) {
+    const total = (window.__mockApis || []).length;
+    mockApiList.innerHTML = `<div class="mock-api-empty">${total ? "无匹配接口（试试调整过滤词）。" : "尚无接口（仅 XHR/FETCH 类型会被模拟）。"}</div>`;
+    return;
+  }
+  mockApiList.innerHTML = list.map((a, i) =>
+    `<div class="mock-api-row${a.mock_pin ? " pinned" : ""}" data-i="${i}" data-seq="${a.seq}">
+      <span class="method-badge m-${String(a.method || "GET").toUpperCase()}">${esc(a.method || "GET")}</span>
+      <span class="mock-api-path" title="${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}">${esc(a.path)}${a.query ? "?" + esc(a.query) : ""}</span>
+      ${rowMarkHtml(a)}
+      <span class="resp-badge">${esc(String(a.status))}</span>
+      ${a.mock_pin ? '<span class="pin-badge">已固定</span>' : ""}
+      <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}">${a.mock_pin ? "取消固定" : "固定"}</button>
+      <button class="btn btn-sm mock-test-one">测试</button>
+      <pre class="mock-api-result" style="display:none"></pre>
+    </div>`
+  ).join("");
+  mockApiList.querySelectorAll(".mock-test-one").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const row = btn.closest(".mock-api-row");
+      testMockApi(window.__mockApisBySeq[row.getAttribute("data-seq")], row);
+    });
+  });
+  mockApiList.querySelectorAll(".mock-pin-one").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      pinMockApi(window.__mockApisBySeq[btn.getAttribute("data-seq")], btn);
     });
   });
 }
@@ -389,9 +415,8 @@ async function testAllMockApis() {
   mockApisSummary.textContent = "测试中…";
   let pass = 0, fail = 0;
   const results = await Promise.all(rows.map(async (row) => {
-    const i = parseInt(row.getAttribute("data-i"), 10);
-    // apis 顺序与渲染一致，用 index 取对应接口
-    const api = window.__mockApis ? window.__mockApis[i] : null;
+    const seq = row.getAttribute("data-seq");
+    const api = window.__mockApisBySeq ? window.__mockApisBySeq[seq] : null;
     if (!api) return null;
     const res = await postJSON("/api/mock/test", {
       method: api.method, path: api.path, query: api.query,
@@ -422,6 +447,8 @@ async function testAllMockApis() {
 
 mockRefreshBtn.addEventListener("click", loadMockApis);
 $("mockTestAllBtn").addEventListener("click", testAllMockApis);
+if (mockSearch) mockSearch.addEventListener("input", applyMockFilterSort);
+if (mockSort) mockSort.addEventListener("change", applyMockFilterSort);
 
 // ---------------- Mock 处理记录（收到的请求 + 返回数据）----------------
 let mockLogs = [];
