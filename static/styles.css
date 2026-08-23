@@ -462,6 +462,42 @@ mark.hl {
 }
 .jind { padding-left: 18px; }
 .jline { position: relative; }
+
+/* ---------- JSON 树折叠 ---------- */
+.jtree-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.jtree-toolbar .btn-mini { opacity: .85; }
+.jtree-toolbar .btn-mini:hover { opacity: 1; }
+.jtree-toolbar .code-copy { position: static; margin-left: auto; opacity: .85; }
+.jnode { }
+.j-open, .j-close { cursor: pointer; }
+.j-toggle {
+  display: inline-block; width: 13px; margin-right: 2px;
+  color: var(--muted); font-size: 10px; line-height: 1;
+  -webkit-user-select: none; -moz-user-select: none; user-select: none;
+  transition: transform .12s ease;
+}
+.j-open:hover, .j-close:hover { background: rgba(0,0,0,.05); }
+.j-preview { display: none; color: var(--muted); font-style: italic; margin-left: 2px; }
+/* 节点级「复制」按钮：悬停行/值时出现，点 ⧉ 复制该节点 JSON */
+.j-copy-btn {
+  margin-left: 5px;
+  opacity: 0;
+  cursor: pointer;
+  color: #185FA5;
+  font-size: 11px;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  pointer-events: none;
+}
+.jline:hover .j-copy-btn, .jval:hover .j-copy-btn { opacity: .85; pointer-events: auto; }
+.j-copy-btn:hover { opacity: 1 !important; pointer-events: auto; }
+/* 折叠态：旋转箭头、隐藏子节点与收尾括号、显示预览 */
+.jnode.collapsed > .j-open .j-toggle { transform: rotate(-90deg); }
+.jnode.collapsed > .j-open .j-preview { display: inline; }
+.jnode.collapsed > .jind,
+.jnode.collapsed > .j-close { display: none; }
+
 .jline:hover { background: rgba(0,0,0,.035); }
 .j-annotated { /* 行级标记类，视觉指示交给 j-note-txt 自身黄底 */ }
 .j-key { color: #185FA5; }

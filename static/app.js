@@ -883,7 +883,11 @@ function jsonOrCode(text, rec, target) {
   const raw = JSON.stringify(obj, null, 2);
   return (
     `<div class="code-wrap">` +
+    `<div class="jtree-toolbar">` +
+    `<button class="btn-mini" data-tree-collapse="all" title="折叠所有 {} / []">⊟ 全部折叠</button>` +
+    `<button class="btn-mini" data-tree-collapse="none" title="展开所有 {} / []">⊞ 全部展开</button>` +
     `<button class="btn-mini code-copy" data-copy>复制</button>` +
+    `</div>` +
     `<div class="code jtree" data-raw="${esc(raw)}">` +
     jsonTreeHtml(obj, "", ann, target) +
     `</div></div>`
@@ -895,32 +899,40 @@ function jsonTreeHtml(v, path, ann, target) {
   const cls = note ? " j-annotated" : "";
   const noteTxt = note ? `<span class="j-note-txt"> // ${esc(note)}</span>` : "";
   const btn = `<span class="j-note-btn" data-ann-path="${esc(path)}" data-ann-target="${target}" title="添加/编辑注释">✎</span>`;
+  // 复制「该节点」JSON 的按钮：把当前值序列化后塞进 data 属性，点击即复制这一段
+  const copyBtn = `<span class="j-copy-btn" data-copy-node="${esc(JSON.stringify(v, null, 2))}" title="复制该节点 JSON">⧉</span>`;
 
   // 标量 / null：用 span 行内，避免被外层 key 行 div 强制换行
   if (v === null) {
-    return `<span class="jline jval-null${cls}"><span class="j-null">null</span>${noteTxt}${btn}</span>`;
+    return `<span class="jline jval-null${cls}"><span class="j-null">null</span>${noteTxt}${copyBtn}${btn}</span>`;
   }
   const t = typeof v;
   if (t === "string" || t === "number" || t === "boolean") {
-    return `<span class="jline jval-${t}${cls}"><span class="j-${t}">${hl(String(v))}</span>${noteTxt}${btn}</span>`;
+    return `<span class="jline jval-${t}${cls}"><span class="j-${t}">${hl(String(v))}</span>${noteTxt}${copyBtn}${btn}</span>`;
   }
 
-  // 数组 / 对象：容器本身用 div 整行
+  // 数组 / 对象：容器本身用 div 整行，支持折叠
   if (Array.isArray(v)) {
     if (v.length === 0) {
-      return `<div class="jline${cls}"><span class="j-punc">[]</span>${noteTxt}${btn}</div>`;
+      return `<div class="jline${cls}"><span class="j-punc">[]</span>${noteTxt}${copyBtn}${btn}</div>`;
     }
-    let h = `<div class="jline${cls}"><span class="j-punc">[</span>${noteTxt}${btn}</div><div class="jind">`;
+    let h = `<div class="jnode${cls}">` +
+      `<div class="jline j-open"><span class="j-toggle" title="折叠/展开">▾</span>` +
+      `<span class="j-punc">[</span><span class="j-preview"> … ${v.length} 项</span>${noteTxt}${copyBtn}${btn}</div>` +
+      `<div class="jind">`;
     v.forEach((item, i) => { h += jsonTreeHtml(item, path ? path + "." + i : String(i), ann, target); });
-    h += `</div><div class="jline"><span class="j-punc">]</span></div>`;
+    h += `</div><div class="jline j-close"><span class="j-punc">]</span></div></div>`;
     return h;
   }
   // object
   const keys = Object.keys(v);
   if (keys.length === 0) {
-    return `<div class="jline${cls}"><span class="j-punc">{}</span>${noteTxt}${btn}</div>`;
+    return `<div class="jline${cls}"><span class="j-punc">{}</span>${noteTxt}${copyBtn}${btn}</div>`;
   }
-  let h = `<div class="jline${cls}"><span class="j-punc">{</span>${noteTxt}${btn}</div><div class="jind">`;
+  let h = `<div class="jnode${cls}">` +
+    `<div class="jline j-open"><span class="j-toggle" title="折叠/展开">▾</span>` +
+    `<span class="j-punc">{</span><span class="j-preview"> … ${keys.length} 项</span>${noteTxt}${copyBtn}${btn}</div>` +
+    `<div class="jind">`;
   keys.forEach((k) => {
     const childPath = path ? path + "." + k : k;
     h += `<div class="jline">` +
@@ -928,7 +940,7 @@ function jsonTreeHtml(v, path, ann, target) {
       jsonTreeHtml(v[k], childPath, ann, target) +
       `</div>`;
   });
-  h += `</div><div class="jline"><span class="j-punc">}</span></div>`;
+  h += `</div><div class="jline j-close"><span class="j-punc">}</span></div></div>`;
   return h;
 }
 
@@ -999,6 +1011,28 @@ detailEl.addEventListener("click", (e) => {
   if (nb && currentDetail) {
     e.stopPropagation();
     annotateField(currentDetail, nb.getAttribute("data-ann-path"), nb.getAttribute("data-ann-target"));
+    return;
+  }
+  // 复制「该节点」JSON：点 ⧉ 只复制这一段（对象/数组整块或叶子值），不影响整棵树复制
+  const nodeCopy = e.target.closest("[data-copy-node]");
+  if (nodeCopy && currentDetail) {
+    e.stopPropagation();
+    copyText(nodeCopy.getAttribute("data-copy-node"), nodeCopy);
+    return;
+  }
+  // JSON 树折叠：点击 {} / [] 的开关行（含 ▾ 箭头与收尾括号行）切换折叠
+  const toggle = e.target.closest(".j-open, .j-close");
+  if (toggle && !e.target.closest(".j-note-btn, .j-note-txt, .j-copy-btn")) {
+    const node = toggle.closest(".jnode");
+    if (node) node.classList.toggle("collapsed");
+    return;
+  }
+  // 全部折叠 / 全部展开
+  const treeToggle = e.target.closest("[data-tree-collapse]");
+  if (treeToggle) {
+    const collapse = treeToggle.getAttribute("data-tree-collapse") === "all";
+    const tree = treeToggle.closest(".code-wrap") && treeToggle.closest(".code-wrap").querySelector(".jtree");
+    if (tree) tree.querySelectorAll(".jnode").forEach((n) => n.classList.toggle("collapsed", collapse));
     return;
   }
   const copyUrlBtn = e.target.closest("[data-copy-url]");
