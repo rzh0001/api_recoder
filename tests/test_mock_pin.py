@@ -1,8 +1,22 @@
 # -*- coding: utf-8 -*-
-"""验证 Mock「固定返回某一条」功能：精确到 (method, path, query)，不同 query 互不干扰。"""
-import json
+"""验证 Mock「固定返回某一条」功能：精确到 (method, path, query)，不同 query 互不干扰。
 
-from app import state, server
+pin 是模糊匹配的特性，测试显式配置 match_mode=false（模拟用户在设置里关掉严格匹配）。
+"""
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from app import config, state, server
+
+_tmp = Path(tempfile.mkdtemp()) / "config.json"
+_tmp.write_text(json.dumps({"match_mode": False}, ensure_ascii=False), encoding="utf-8")
+config.CONFIG_FILE = _tmp
 
 
 def make_rec(method, path, query, body, status=200):
@@ -23,6 +37,7 @@ def make_rec(method, path, query, body, status=200):
 
 
 def main():
+    state.store.set_persist(None)  # 测试隔离：不落盘到真实 data/records.json
     state.store.clear_all()
     s1 = state.store.add(make_rec("GET", "/api/x", "", json.dumps({"v": 1})))
     s2 = state.store.add(make_rec("GET", "/api/x", "", json.dumps({"v": 2})))

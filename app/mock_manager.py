@@ -25,66 +25,100 @@ def _norm(p):
     return p if p.startswith("/") else "/" + p
 
 
-def _build_data():
-    # 延迟导入，避免与 state 形成循环依赖
-    from . import state
+def _body_preview(body, limit=160):
+    """响应体转字符串并截断，供列表行内预览/展开查看。"""
+    if body is None:
+        return ""
+    if not isinstance(body, str):
+        try:
+            body = json.dumps(body, ensure_ascii=False)
+        except Exception:
+            body = str(body)
+    body = body.strip()
+    return body if len(body) <= limit else body[:limit] + "…"
 
-    out = []
-    for r in state.store.requests:
-        rt = (r.get("resource_type") or "").upper()
-        if rt not in ("XHR", "FETCH"):
-            continue
-        resp = r.get("response") or {}
-        out.append({
-            "method": r.get("method"),
-            "path": r.get("path") or "",
-            "query": r.get("query") or "",
-            "seq": r.get("seq"),
-            "note": r.get("note") or "",
-            "tags": r.get("tags") or [],
-            "mock_pin": bool(r.get("mock_pin")),
-            "url": r.get("url") or "",
-            "response": {
-                "status": resp.get("status", 200),
-                "headers": resp.get("headers") or {},
-                "body": resp.get("body"),
-            },
-        })
-    return out
+
+def _body_pretty(body):
+    """把响应/请求体格式化为可读 JSON（含缩进）。解析失败则原样返回。"""
+    if body is None:
+        return ""
+    if isinstance(body, (dict, list)):
+        try:
+            return json.dumps(body, ensure_ascii=False, sort_keys=True, indent=2)
+        except Exception:
+            return str(body)
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            body = body.decode("utf-8", "replace")
+        except Exception:
+            return repr(body)
+    if not isinstance(body, str):
+        body = str(body)
+    body = body.strip()
+    if not body:
+        return ""
+    try:
+        return json.dumps(json.loads(body), ensure_ascii=False, sort_keys=True, indent=2)
+    except Exception:
+        return body
+
+
+def _norm_body(body):
+    """请求体归一化为可比较对象：能解析成 JSON 则按语义(dict/list)，否则原字符串；空/None 归一为 None。"""
+    if body is None:
+        return None
+    if not isinstance(body, str):
+        return body  # 已是 dict/list，交给 == 做语义比较
+    s = body.strip()
+    if not s:
+        return None
+    try:
+        return json.loads(s)
+    except Exception:
+        return s
+
+
+def _body_equal(a, b):
+    """两条请求体是否语义相等（JSON 对象键序无关）。"""
+    na, nb = _norm_body(a), _norm_body(b)
+    if na is None and nb is None:
+        return True
+    if na is None or nb is None:
+        return False
+    return na == nb  # dict/list 深度比较（键序无关），否则字符串比较
+
+
+def _get_store():
+    """延迟取 store，避免 mock_manager 与 state 循环导入。"""
+    from . import state
+    return state.store
 
 
 def _make_app(manager):
     app = Flask("mock")
     app.url_map.strict_slashes = False
 
-    def find_match(method, path, query_str):
-        data = manager.data  # 每次请求动态读取，rebuild() 重新赋值后才能实时生效
-        path = _norm(path)
-        # 固定精确到 (method+path+query)：不同 query 互不干扰，可分别固定不同响应。
-        for r in data:
-            if (r.get("mock_pin") and r.get("method") == method
-                    and _norm(r.get("path", "")) == path
-                    and (r.get("query") or "") == query_str):
-                return r
-        # 普通 first 精确 (method+path+query)
-        for r in data:
-            if (r.get("method") == method and _norm(r.get("path", "")) == path
-                    and (r.get("query") or "") == query_str):
-                return r
-        # 回退 method+path（无精确 query 录制时，保持原行为；向后兼容）
-        for r in data:
-            if r.get("method") == method and _norm(r.get("path", "")) == path:
-                return r
-        return None
+    # match_mode 真源：环境变量 > config.json > 默认严格（见 app/config.py），每次启动时动态读取
+    from . import config
+    strict = config.get_match_mode()
 
     @app.route("/", defaults={"path": ""}, methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
     @app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
     def mock(path):
-        m = find_match(request.method, "/" + path, request.query_string.decode("utf-8", "replace"))
+        # 请求体（用于按请求体匹配不同返回），日志也要用，只取一次
+        req_body = request.get_data(cache=True)
+        if isinstance(req_body, bytes):
+            req_body = req_body.decode("utf-8", "replace")
+        m = manager.match(request.method, "/" + path, request.query_string.decode("utf-8", "replace"), req_body, strict=strict)
         if not m:
+            # 严格模式：入参无匹配 -> 返回 404（接口在 mock 库中未找到）
+            # 非严格模式：保持原回退行为，仍返回 404
             status = 404
             body = ""
             headers = {"Content-Type": "text/plain; charset=utf-8"}
+            miss_reason = manager.miss_reason(
+                request.method, "/" + path,
+                request.query_string.decode("utf-8", "replace"), req_body)
         else:
             resp = m.get("response") or {}
             body = resp.get("body") or ""
@@ -96,16 +130,13 @@ def _make_app(manager):
         # 记录处理日志（收到的请求 + 返回数据），供界面点击查看
         try:
             from . import state
-            req_body = request.get_data(cache=True)
-            if isinstance(req_body, bytes):
-                req_body = req_body.decode("utf-8", "replace")
             state.mock_manager.log_request({
                 "ts": time.time(),
                 "method": request.method,
                 "path": _norm(path) or "/",
                 "query": request.query_string.decode("utf-8", "replace"),
-                "url": request.url,
                 "matched": bool(m),
+                "miss_reason": miss_reason if not m else None,
                 "status": status,
                 "req_headers": {k: v for k, v in request.headers.items()},
                 "req_body": req_body[:65536],
@@ -139,6 +170,41 @@ class MockManager:
             if len(self.logs) > MAX_MOCK_LOGS:
                 self.logs = self.logs[-MAX_MOCK_LOGS:]
 
+    def miss_reason(self, method, path, query_str, req_body):
+        """未命中时定位卡在哪个环节：method+path 无匹配 -> query 不匹配 -> 请求体不匹配。"""
+        data = _get_store().get_mock_data()
+        path = _norm(path)
+        same_mp = [r for r in data
+                   if r.get("method") == method and _norm(r.get("path", "") or "") == path]
+        if not same_mp:
+            return "库中无此接口（method+path 无匹配记录）"
+        same_q = [r for r in same_mp if (r.get("query") or "") == query_str]
+        if not same_q:
+            return "同路径记录 %d 条，query 均不匹配（请求 query: %s）" % (
+                len(same_mp), query_str or "空")
+        nb = _norm_body(req_body)
+        if nb is None:
+            return "同 query 记录 %d 条，请求未携带请求体，记录均带请求体" % len(same_q)
+        if isinstance(nb, dict):
+            for r in same_q[:3]:
+                nr = _norm_body(r.get("req_body"))
+                if not isinstance(nr, dict):
+                    continue
+                miss = sorted(set(nb) - set(nr))
+                extra = sorted(set(nr) - set(nb))
+                diff = []
+                if miss:
+                    diff.append("请求多出键: " + ", ".join(miss))
+                if extra:
+                    diff.append("记录多出键: " + ", ".join(extra))
+                if diff:
+                    return "同 query 记录 %d 条，请求体均不匹配；与其中一条对比：%s" % (
+                        len(same_q), "；".join(diff))
+                return "同 query 记录 %d 条，请求体键一致但值不同（请求体: %s）" % (
+                    len(same_q), _body_preview(req_body, 80))
+        return "同 query 记录 %d 条，请求体均不匹配（请求体: %s）" % (
+            len(same_q), _body_preview(req_body, 80))
+
     def logs_list(self):
         """返回处理记录（最新在前）。"""
         with self._lock:
@@ -149,20 +215,18 @@ class MockManager:
         return self._srv is not None
 
     def rebuild(self):
-        """运行中时按最新录制库重建匹配表（固定/取消固定后实时生效）。未运行时为空操作。"""
-        with self._lock:
-            if not self.running:
-                return
-            self.data = _build_data()
+        """实时模式下无需重建：Mock 每次匹配都直接读最新录制库，固定/编辑即时生效。"""
+        return
 
     def start(self, port=None):
         with self._lock:
             if self.running:
                 return {
                     "ok": True, "already_running": True,
-                    "url": self._url(), "port": self.port, "count": len(self.data),
+                    "url": self._url(), "port": self.port, "count": len(_get_store().get_mock_data()),
                 }
-            data = _build_data()
+            # 实时读取当前录制库（不再冻结快照）；录制/编辑/Mock 可并发
+            data = _get_store().get_mock_data()
             if not data:
                 return {
                     "ok": False,
@@ -219,26 +283,85 @@ class MockManager:
                 "running": True,
                 "url": self._url(),
                 "port": self.port,
-                "count": len(self.data),
+                "count": len(_get_store().get_mock_data()),
                 "started_at": self.started_at,
             }
 
+    def match(self, method, path, query_str, req_body=None, strict=True):
+        """按 (method, path, query, 请求体) 匹配一条录制记录，返回该记录或 None。
+
+        strict=True（默认）：仅 method+path+query+请求体 精确匹配，未命中返回 None。
+        strict=False（模糊）：按优先级回退：
+          1) 固定(pin) 且 method+path+query+请求体 精确 —— 最高优先
+          2) 固定(pin) 且 method+path+query 精确 —— 现有兜底语义
+          3) 非固定 method+path+query+请求体 精确
+          4) 非固定 method+path+query 精确
+          5) 回退 method+path
+        """
+        data = _get_store().get_mock_data()
+        path = _norm(path)
+
+        if strict:
+            # 严格模式：仅 method+path+query+req_body 精确匹配，任何未命中一律返回 None
+            for r in data:
+                if (r.get("method") == method
+                        and _norm(r.get("path", "")) == path
+                        and (r.get("query") or "") == query_str
+                        and _body_equal(r.get("req_body"), req_body)):
+                    return r
+            return None  # 未命中即不回退
+
+        # 1) pin + 请求体精确
+        for r in data:
+            if (r.get("mock_pin") and r.get("method") == method
+                    and _norm(r.get("path", "")) == path
+                    and (r.get("query") or "") == query_str
+                    and _body_equal(r.get("req_body"), req_body)):
+                return r
+        # 2) pin + 仅 query（现有兜底：固定后该 query 一律返回此条，忽略请求体）
+        for r in data:
+            if (r.get("mock_pin") and r.get("method") == method
+                    and _norm(r.get("path", "")) == path
+                    and (r.get("query") or "") == query_str):
+                return r
+        # 3) 非 pin + 请求体精确（同 query 多条、请求体不同时各自返回自己的）
+        for r in data:
+            if (r.get("method") == method and _norm(r.get("path", "")) == path
+                    and (r.get("query") or "") == query_str
+                    and _body_equal(r.get("req_body"), req_body)):
+                return r
+        # 4) 非 pin + 仅 query
+        for r in data:
+            if (r.get("method") == method and _norm(r.get("path", "")) == path
+                    and (r.get("query") or "") == query_str):
+                return r
+        # 5) 回退 method+path
+        for r in data:
+            if r.get("method") == method and _norm(r.get("path", "")) == path:
+                return r
+        return None
+
     def apis(self):
-        """返回当前正在模拟的接口清单（给前端展示列表用）。"""
-        with self._lock:
-            return [
-                {
-                    "method": r.get("method"),
-                    "path": r.get("path") or "",
-                    "query": r.get("query") or "",
-                    "seq": r.get("seq"),
-                    "mock_pin": bool(r.get("mock_pin")),
-                    "status": (r.get("response") or {}).get("status", 200),
-                    "note": r.get("note") or "",
-                    "tags": r.get("tags") or [],
-                }
-                for r in self.data
-            ]
+        """返回当前正在模拟的接口清单（给前端展示列表用）。实时读取。"""
+        return [
+            {
+                "method": r.get("method"),
+                "path": r.get("path") or "",
+                "query": r.get("query") or "",
+                "seq": r.get("seq"),
+                "mock_pin": bool(r.get("mock_pin")),
+                "status": (r.get("response") or {}).get("status", 200),
+                "note": r.get("note") or "",
+                "tags": r.get("tags") or [],
+                "body_preview": _body_preview((r.get("response") or {}).get("body"), 160),
+                "body_view": _body_preview((r.get("response") or {}).get("body"), 8000),
+                "body_pretty": _body_pretty((r.get("response") or {}).get("body")),
+                "req_body_preview": _body_preview(r.get("req_body"), 160),
+                "req_body_view": _body_preview(r.get("req_body"), 8000),
+                "req_body_pretty": _body_pretty(r.get("req_body")),
+            }
+            for r in _get_store().get_mock_data()
+        ]
 
     def _url(self):
         if self.port is None:

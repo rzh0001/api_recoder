@@ -16,6 +16,8 @@ build/
 # 用户数据 / 已录制的导出文件
 *.har
 *.json
+# SQLite 持久化库（录制数据的唯一真源，随本机生成，不入库）
+data/
 !requirements.txt
 
 # 日志（运行时重定向输出）

@@ -16,7 +16,7 @@ from flask_sock import Sock
 
 from . import state
 from .capture_store import _registered_domain
-from .config import HOST, PORT, MOCK_PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG, EXPORT_DIR
+from .config import HOST, PORT, MOCK_PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG, EXPORT_DIR, _load_user_config
 
 
 def resolve_port(preferred=None):
@@ -322,13 +322,16 @@ def api_download():
 # ---------------- 配置（端口等，改后需重启生效） ----------------
 @app.route("/api/config")
 def api_get_config():
+    # 直接读最新落盘配置，避免返回导入时缓存的旧 USER_CONFIG（保存后立即回显正确）
+    cfg_now = _load_user_config()
     return json.dumps(
         {
-            "saved_port": USER_CONFIG.get("port"),
-            "mock_port": USER_CONFIG.get("mock_port"),
+            "saved_port": cfg_now.get("port"),
+            "mock_port": cfg_now.get("mock_port"),
+            "match_mode": cfg_now.get("match_mode"),
             "running_port": request.host.split(":")[1] if ":" in request.host else "80",
             "browser_options": ["auto", "chrome", "edge"],
-            "last_source_har": USER_CONFIG.get("last_source_har"),
+            "last_source_har": cfg_now.get("last_source_har"),
         },
         ensure_ascii=False,
     )
@@ -337,23 +340,8 @@ def api_get_config():
 @app.post("/api/config")
 def api_set_config():
     data = request.get_json(silent=True) or {}
-    port = data.get("port")
-    if port is not None:
-        try:
-            port = int(port)
-            if not (1 <= port <= 65535):
-                raise ValueError("端口范围 1-65535")
-        except (TypeError, ValueError) as e:
-            return json.dumps({"ok": False, "error": f"端口无效：{e}"}, ensure_ascii=False), 400
-    mock_port = data.get("mock_port")
-    if mock_port is not None:
-        try:
-            mock_port = int(mock_port)
-            if not (1 <= mock_port <= 65535):
-                raise ValueError("端口范围 1-65535")
-        except (TypeError, ValueError) as e:
-            return json.dumps({"ok": False, "error": f"Mock 端口无效：{e}"}, ensure_ascii=False), 400
-    # 读取现有配置并覆写字段，避免丢失其他键
+    # 只更新请求里「显式出现」的键；未出现的键一律保留。
+    # 这样保存端口、切换匹配模式开关（只传部分字段）互不干扰，不会再清掉已保存端口。
     cfg = {}
     try:
         if CONFIG_FILE.exists():
@@ -361,14 +349,37 @@ def api_set_config():
                 cfg = json.load(f) or {}
     except Exception:
         cfg = {}
-    if port is None:
-        cfg.pop("port", None)
-    else:
-        cfg["port"] = port
-    if mock_port is None:
-        cfg.pop("mock_port", None)
-    else:
-        cfg["mock_port"] = mock_port
+
+    if "port" in data:
+        port = data["port"]
+        if port is not None:
+            try:
+                port = int(port)
+                if not (1 <= port <= 65535):
+                    raise ValueError("端口范围 1-65535")
+            except (TypeError, ValueError) as e:
+                return json.dumps({"ok": False, "error": f"端口无效：{e}"}, ensure_ascii=False), 400
+            cfg["port"] = port
+        else:
+            cfg.pop("port", None)
+
+    if "mock_port" in data:
+        mock_port = data["mock_port"]
+        if mock_port is not None:
+            try:
+                mock_port = int(mock_port)
+                if not (1 <= mock_port <= 65535):
+                    raise ValueError("端口范围 1-65535")
+            except (TypeError, ValueError) as e:
+                return json.dumps({"ok": False, "error": f"Mock 端口无效：{e}"}, ensure_ascii=False), 400
+            cfg["mock_port"] = mock_port
+        else:
+            cfg.pop("mock_port", None)
+
+    if "match_mode" in data:
+        v = data["match_mode"]
+        cfg["match_mode"] = v if isinstance(v, bool) else str(v).lower() in ("strict", "true", "1", "yes")
+
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -763,7 +774,7 @@ def api_mock_pin():
 def _import_files(files):
     """公共导入逻辑（多文件 / 单文件 / base64 打开共用）：
     两阶段原子导入——先全部解析+格式识别+结构校验（不碰 store），
-    有任一坏文件则整体拒绝（现有数据不丢），全部合法才 clear 一次后合并追加。
+    有任一坏文件则整体拒绝（现有数据不丢），全部合法才增量合并追加到当前库。
     返回 (ok: bool, resp: dict, status: int)。"""
     files = [f for f in files if f is not None and f.filename]
     if not files:
@@ -795,22 +806,23 @@ def _import_files(files):
         return False, {"ok": False, "error": "未识别到任何可导入的文件"}, 400
 
     total = 0
+    dup_total = 0
     kinds = []
     try:
-        state.store.clear_all()
         for _fn, kind, obj in parsed:
             if kind == "HAR":
-                n = state.store.import_from_har(obj, clear=False)
+                n, dup = state.store.import_from_har(obj, clear=False)
             else:
-                n = state.store.import_from_json(obj, clear=False)
+                n, dup = state.store.import_from_json(obj, clear=False)
             if n > 0 and kind not in kinds:
                 kinds.append(kind)
             total += n
+            dup_total += dup
     except Exception as e:
         return False, {"ok": False, "error": f"导入失败：{e}"}, 500
 
     _broadcast_snapshot()
-    return True, {"ok": True, "kind": "+".join(kinds) or "HAR", "count": total, "files": len(parsed)}, 200
+    return True, {"ok": True, "kind": "+".join(kinds) or "HAR", "count": total, "files": len(parsed), "duplicates": dup_total}, 200
 
 
 class _MemoryFile:
@@ -836,11 +848,11 @@ def api_import():
     if ok:
         state.store.source_path = None
         try:
-            cfg = USER_CONFIG
-            if cfg.get("last_source_har"):
-                cfg["last_source_har"] = ""
-                with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
-                    json.dump(cfg, fh, ensure_ascii=False, indent=2)
+            # 读最新落盘配置再覆写，避免用启动时缓存的 USER_CONFIG 整体覆盖，冲掉已保存端口
+            cfg = _load_user_config()
+            cfg["last_source_har"] = ""
+            with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
+                json.dump(cfg, fh, ensure_ascii=False, indent=2)
         except Exception:
             pass
     return json.dumps(resp, ensure_ascii=False), status
@@ -864,7 +876,8 @@ def api_import_base64():
         state.store.source_path = source_path or None
         if source_path:
             try:
-                cfg = USER_CONFIG
+                # 读最新落盘配置再覆写，避免用启动时缓存的 USER_CONFIG 整体覆盖，冲掉已保存端口
+                cfg = _load_user_config()
                 cfg["last_source_har"] = source_path
                 with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
                     json.dump(cfg, fh, ensure_ascii=False, indent=2)

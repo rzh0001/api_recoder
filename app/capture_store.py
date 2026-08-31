@@ -5,8 +5,10 @@
 """
 import copy
 import json
+import os
 import threading
 import time
+from pathlib import Path
 from urllib.parse import urlparse, parse_qsl
 
 import tldextract
@@ -19,6 +21,30 @@ _EXTRACTOR = tldextract.TLDExtract(suffix_list_urls=())
 
 def _norm(p):
     return p if p.startswith("/") else "/" + p
+
+
+def _body_norm(b):
+    """请求/返回体归一化为可比较对象：JSON 解析成 dict/list（键序无关），否则原字符串；空/None 归一为 None。"""
+    if b is None:
+        return None
+    if not isinstance(b, str):
+        return b
+    s = b.strip()
+    if not s:
+        return None
+    try:
+        return json.loads(s)
+    except Exception:
+        return s
+
+
+def _same_req(a, b):
+    """两条记录是否视为同一条（去重用）：method+path+query+请求体+返回体语义相同。"""
+    return (a.get("method") == b.get("method")
+            and _norm(a.get("path") or "") == _norm(b.get("path") or "")
+            and (a.get("query") or "") == (b.get("query") or "")
+            and _body_norm((a.get("request") or {}).get("post_data")) == _body_norm((b.get("request") or {}).get("post_data"))
+            and _body_norm((a.get("response") or {}).get("body")) == _body_norm((b.get("response") or {}).get("body")))
 
 
 def _registered_domain(url):
@@ -114,7 +140,78 @@ def _mask_record(rec, cfg=None):
 class CaptureStore:
     def __init__(self):
         self._lock = threading.Lock()
+        self.persist_path = None      # 持久化 JSON 文件路径；None 表示不落盘
+        self._persist_timer = None    # 防抖写盘 Timer
+        self._dirty = False           # 数据是否自上次落盘后变更（无变更不写盘）
         self.clear_all()
+
+    # ---------- 持久化（JSON 落盘，重启后恢复录制数据） ----------
+    def set_persist(self, path):
+        """启用持久化：设置文件路径，若已存在则加载历史录制数据。
+        path 为 None 时禁用持久化（测试隔离用）。"""
+        if path is None:
+            with self._lock:
+                self.persist_path = None
+                self._dirty = False
+                if self._persist_timer is not None:
+                    self._persist_timer.cancel()
+                    self._persist_timer = None
+            return
+        self.persist_path = str(path)
+        try:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            with open(self.persist_path, "r", encoding="utf-8") as f:
+                obj = json.load(f)
+        except Exception:
+            return
+        reqs = obj.get("requests") or []
+        with self._lock:
+            self.requests = list(reqs)
+            self.by_seq = {}
+            max_seq = 0
+            for r in reqs:
+                s = r.get("seq")
+                if isinstance(s, int):
+                    self.by_seq[s] = r
+                    max_seq = max(max_seq, s)
+            self._seq = max_seq
+            self._dirty = False
+
+    def persist(self):
+        """把当前内存录制数据原子写盘（临时文件 + replace）。可手动/退出时调用。
+        仅当数据自上次落盘后有变更才写盘（_dirty 标记）。"""
+        path = self.persist_path
+        if not path:
+            return
+        with self._lock:
+            if not self._dirty:
+                return
+            snapshot = [dict(r) for r in self.requests]
+            seq = self._seq
+            self._dirty = False
+        try:
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"seq": seq, "requests": snapshot}, f, ensure_ascii=False)
+            os.replace(tmp, path)
+        except Exception:
+            with self._lock:
+                self._dirty = True  # 写盘失败，保留脏标记以便重试
+
+    def _schedule_persist(self):
+        """防抖：1 秒内多次变更只写一次盘；Timer 为 daemon，进程退出由 atexit 兜底。"""
+        if self.persist_path is None:
+            return
+        self._dirty = True
+        if self._persist_timer is not None:
+            self._persist_timer.cancel()
+        t = threading.Timer(1.0, self.persist)
+        t.daemon = True
+        self._persist_timer = t
+        t.start()
 
     # ---------- 写入 ----------
     def clear_all(self):
@@ -126,6 +223,7 @@ class CaptureStore:
             self.ended_at = None
             # 「打开」关联的源文件路径（「保存」时覆盖写回它）
             self.source_path = None
+        self._schedule_persist()
 
     def add(self, record):
         """写入一条完整记录（body 已截断到 MAX_BODY_STORE），返回序号 seq。"""
@@ -150,7 +248,8 @@ class CaptureStore:
             if len(self.requests) > MAX_REQUESTS:
                 old = self.requests.pop(0)
                 self.by_seq.pop(old["seq"], None)
-            return seq
+        self._schedule_persist()
+        return seq
 
     def get(self, seq):
         with self._lock:
@@ -166,11 +265,14 @@ class CaptureStore:
                 self.requests.remove(rec)
             except ValueError:
                 pass
-            return True
+        self._schedule_persist()
+        return True
 
     def mark_stopped(self):
         with self._lock:
             self.ended_at = time.time()
+        self._dirty = True
+        self.persist()   # 停止录制时立即落盘，避免防抖窗口内数据丢失
 
     def set_mark(self, seq, note=None, tags=None):
         """更新记录的记录级标记：note（备注文本）、tags（标签列表）。None 表示不改该字段。"""
@@ -182,7 +284,8 @@ class CaptureStore:
                 rec["note"] = note
             if tags is not None:
                 rec["tags"] = tags
-            return True
+        self._schedule_persist()
+        return True
 
     def set_pin(self, seq, pinned):
         """固定/取消固定某条记录作为 Mock 返回。以「同一个 API 请求」= (method, path, query)
@@ -202,7 +305,8 @@ class CaptureStore:
                             other.pop("mock_pin", None)
             else:
                 rec.pop("mock_pin", None)
-            return True
+        self._schedule_persist()
+        return True
 
     def set_annotation(self, seq, target, path, note):
         """设置/删除某条记录的字段级注释。
@@ -226,7 +330,8 @@ class CaptureStore:
                 rec["annotations"] = ann
             else:
                 rec.pop("annotations", None)
-            return True
+        self._schedule_persist()
+        return True
 
     # ---------- 轻量拷贝（用于 WebSocket 实时推送） ----------
     def light(self, rec):
@@ -268,9 +373,43 @@ class CaptureStore:
                 "by_type": by_type,
                 "by_method": by_method,
                 "errors": errors,
-                "started_at": self.started_at,
-                "ended_at": self.ended_at,
-            }
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+        }
+
+    # ---------- Mock 数据源 ----------
+    def get_mock_data(self):
+        """返回可用于 Mock 的录制记录（仅 XHR/FETCH 类型），结构与 mock 匹配所需一致。
+
+        实时读取当前内存中的录制，录制 / 编辑 / Mock 可并发生效。
+        字段：method / path / query / seq / note / tags / mock_pin / url /
+        req_body（请求体）/ response{status,headers,body}。
+        """
+        with self._lock:
+            out = []
+            for r in self.requests:
+                rt = (r.get("resource_type") or "").upper()
+                if rt not in ("XHR", "FETCH"):
+                    continue
+                resp = r.get("response") or {}
+                req = r.get("request") or {}
+                out.append({
+                    "method": r.get("method"),
+                    "path": r.get("path") or "",
+                    "query": r.get("query") or "",
+                    "seq": r.get("seq"),
+                    "note": r.get("note") or "",
+                    "tags": r.get("tags") or [],
+                    "mock_pin": bool(r.get("mock_pin")),
+                    "url": r.get("url") or "",
+                    "req_body": req.get("post_data"),
+                    "response": {
+                        "status": resp.get("status", 200),
+                        "headers": resp.get("headers") or {},
+                        "body": resp.get("body"),
+                    },
+                })
+            return out
 
     # ---------- 导出 ----------
     def export_json(self, desensitize=False, mask_cfg=None):
@@ -374,29 +513,38 @@ class CaptureStore:
         return entry
 
     # ---------- 导入 ----------
-    def import_from_json(self, obj, clear=True):
+    def import_from_json(self, obj, clear=True, dedup=True):
         """导入本工具导出的 JSON：{'meta':..., 'requests':[record,...]}。
-        clear=True 时替换当前记录（先 clear_all），否则追加到现有记录。返回导入条数。"""
+        clear=True 时替换当前记录（先 clear_all），否则追加到现有记录。
+        dedup=True 时跳过与库中已有记录完全相同的条目（method+path+query+请求体+返回体语义）。
+        返回 (导入条数, 去重条数)。"""
         requests = obj.get("requests")
         if not isinstance(requests, list):
             raise ValueError("JSON 格式缺少 requests 数组")
         if clear:
             self.clear_all()
         n = 0
+        dup = 0
+        existing = [] if clear else list(self.requests)
         for rec in requests:
             if not isinstance(rec, dict):
                 continue
             rec.pop("seq", None)
             rec.pop("captured_at", None)
+            if dedup and any(_same_req(rec, e) for e in existing):
+                dup += 1
+                continue
             self.add(rec)
+            existing.append(rec)
             n += 1
         self.mark_stopped()
-        return n
+        return n, dup
 
-    def import_from_har(self, obj, clear=True):
+    def import_from_har(self, obj, clear=True, dedup=True):
         """导入 HAR 1.2（本工具导出或 Chrome/Fiddler 等标准 HAR 均可）：
         {'log': {'entries':[entry,...]}}。clear=True 时替换当前记录（先 clear_all），
-        否则追加到现有记录。返回导入条数。"""
+        否则追加到现有记录。dedup=True 时跳过与库中已有记录完全相同的条目。
+        返回 (导入条数, 去重条数)。"""
         log = obj.get("log") or {}
         entries = log.get("entries")
         if not isinstance(entries, list):
@@ -404,13 +552,20 @@ class CaptureStore:
         if clear:
             self.clear_all()
         n = 0
+        dup = 0
+        existing = [] if clear else list(self.requests)
         for entry in entries:
             rec = self._from_har_entry(entry)
-            if rec:
-                self.add(rec)
-                n += 1
+            if not rec:
+                continue
+            if dedup and any(_same_req(rec, e) for e in existing):
+                dup += 1
+                continue
+            self.add(rec)
+            existing.append(rec)
+            n += 1
         self.mark_stopped()
-        return n
+        return n, dup
 
     @staticmethod
     def _from_har_entry(entry):

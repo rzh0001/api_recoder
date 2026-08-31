@@ -92,5 +92,29 @@ MAX_REQUESTS = int(os.environ.get("API_RECORDER_MAX_REQUESTS", "50000"))
 MAX_BODY_STORE = 2 * 1024 * 1024     # 单请求 body 在内存中最多存 2MB
 MAX_BODY_WS = 200 * 1024             # 经 WebSocket 实时推送的 body 最多 200KB
 
+# Mock 匹配模式：默认严格匹配（仅 method+path+query+请求体 精确匹配）；
+# 仅当显式配置 match_mode 为模糊（fuzzy/false/0/no）时才启用多级回退匹配。
+# 来源优先级：环境变量 API_RECORDER_MATCH_MODE > config.json 的 match_mode > 默认严格
+_STRICT_MODE_ENV = os.environ.get("API_RECORDER_MATCH_MODE", "").lower() in ("strict", "true", "1", "yes")
+_STRICT_MODE_CFG = USER_CONFIG.get("match_mode")
+
+
+def get_match_mode():
+    """动态读取 Mock 匹配模式（环境变量 > config.json > 默认严格），每次启动 Mock 时调用。
+
+    环境变量 API_RECORDER_MATCH_MODE 显式设置时优先；否则重新读 config.json，
+    保证用户在前端切换匹配模式后无需重启主程序即可生效。
+    """
+    env = os.environ.get("API_RECORDER_MATCH_MODE", "").lower()
+    if env:
+        return env in ("strict", "true", "1", "yes")
+    val = _load_user_config().get("match_mode")
+    if val is None:
+        return True
+    if isinstance(val, bool):
+        return val
+    return str(val).lower() in ("strict", "true", "1", "yes")
+
+
 APP_NAME = "API Recorder"
 APP_VERSION = "0.1.0"

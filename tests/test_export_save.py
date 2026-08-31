@@ -26,6 +26,7 @@ def make_rec(method, path, query, body, status=200):
 
 
 def main():
+    state.store.set_persist(None)  # 测试隔离：不落盘到真实 data/records.json
     state.store.clear_all()
     state.store.add(make_rec("GET", "/api/x", "", json.dumps({"v": 1})))
     client = server.app.test_client()

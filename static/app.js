@@ -37,6 +37,7 @@ const ignoreHeadersEl = $("ignoreHeaders");
 
 // ---------------- 状态 ----------------
 let allRequests = [];
+window.allRequests = allRequests;
 let collapsed = new Set();
 let ws = null;
 let renderTimer = null;
@@ -111,6 +112,9 @@ function methodClass(r) {
 
 function pretty(text) {
   if (text === null || text === undefined) return null;
+  if (typeof text !== "string") {
+    try { return JSON.stringify(text, null, 2); } catch (e) { return String(text); }
+  }
   try {
     return JSON.stringify(JSON.parse(text), null, 2);
   } catch (e) {
@@ -197,6 +201,7 @@ function connect() {
 function handleMsg(msg) {
   if (msg.type === "snapshot") {
     allRequests = msg.requests || [];
+    window.allRequests = allRequests;
     if (msg.status) updateStatus(msg.status);
     scheduleRender();
   } else if (msg.type === "request") {
@@ -206,6 +211,7 @@ function handleMsg(msg) {
     if (msg.data) updateStatus(msg.data);
   } else if (msg.type === "cleared") {
     allRequests = [];
+    window.allRequests = allRequests;
     scheduleRender();
   } else if (msg.type === "mock") {
     if (msg.status) updateMockUI(msg.status);
@@ -241,16 +247,12 @@ function updateStatus(info) {
 // 避免启动后的快照与录制库悄悄不一致；录制中禁用 启动 Mock（两者不能共存）。
 // 后端 /api/start、/api/mock/start 也有守卫，这里只做前端防手滑 + tooltip 提示。
 function applyLocks() {
-  const lockStore = mockRunning;
-  startBtn.disabled = lockStore || recordingActive;
-  importBtn.disabled = lockStore;
-  clearBtn.disabled = lockStore;
-  startMockBtn.disabled = recordingActive || mockRunning;
-  const tip = lockStore ? "Mock 运行中，录制库已锁定；停止 Mock 后可编辑" : "";
-  startBtn.title = tip;
-  importBtn.title = tip;
-  clearBtn.title = tip;
-  startMockBtn.title = recordingActive ? "录制进行中，请先停止录制再启动 Mock" : "";
+  // Mock 现已读实时库：录制 / 编辑 / 启动 Mock 不再互斥，仅刷新状态显示
+  stopBtn.disabled = !recordingActive;
+  stopMockBtn.disabled = !mockRunning;
+  const dot = $("statusDot"); const txt = $("statusText");
+  if (dot) dot.classList.toggle("live", recordingActive || mockRunning);
+  if (txt) txt.textContent = recordingActive ? "录制中" : (mockRunning ? "Mock 运行中" : "空闲");
 }
 
 function updateStats(visible) {
@@ -268,10 +270,13 @@ const mockSbStatus = $("sbMockStatus");   // 底部状态栏的 Mock 状态
 const mockSbStatsEl = $("sbMockStats");   // 底部状态栏的 Mock 统计（接口数）
 const mockRefreshBtn = $("mockRefreshBtn");
 let mockUrl = "";
+const mockStrictToggleEl = $("mockStrictToggle"); // Mock 匹配模式开关（严格/模糊）
+let mockStrictMode = true;                     // 默认严格匹配；关掉开关 = 模糊回退
 
 function updateMockUI(info) {
   if (!info) return;
   mockRunning = !!info.running;
+  startMockBtn.disabled = mockRunning;   // 运行中禁用「启动」，停止后恢复可点
   if (info.running) {
     stopMockBtn.disabled = false;
     mockRefreshBtn.disabled = false;
@@ -291,6 +296,25 @@ function updateMockUI(info) {
     loadMockApis();
   }
   applyLocks();   // 同步冻结/恢复录制库按钮
+}
+
+// 同步匹配模式开关状态到后端（true=严格，false=模糊）
+function syncMockStrictMode() {
+  postJSON("/api/config", { match_mode: mockStrictMode })
+    .then((res) => {
+      if (res.ok) {
+        mockStrictMode = res.data ? res.data.match_mode !== false : true;
+        updateStrictModeUI();
+      }
+    })
+    .catch(() => {});
+}
+
+// 根据后端配置更新 UI 状态
+function updateStrictModeUI() {
+  if (mockStrictToggleEl && mockStrictToggleEl.checked !== mockStrictMode) {
+    mockStrictToggleEl.checked = mockStrictMode;
+  }
 }
 
 // ---------------- Mock 接口列表（内联在 Mock tab）+ 快速测试 ----------------
@@ -324,7 +348,7 @@ function applyMockFilterSort() {
   let list = apis;
   if (tokens.length) {
     list = apis.filter((a) => {
-      const hay = [a.method, a.path, a.query, a.note, (a.tags || []).join(" "), a.status].join(" ").toLowerCase();
+      const hay = [a.method, a.path, a.query, a.note, (a.tags || []).join(" "), a.status, a.body_preview, a.req_body_preview].join(" ").toLowerCase();
       return tokens.every((t) => hay.indexOf(t) !== -1);
     });
   }
@@ -336,6 +360,158 @@ function applyMockFilterSort() {
   else if (sort === "pin") list.sort((a, b) => (b.mock_pin ? 1 : 0) - (a.mock_pin ? 1 : 0));
   renderMockApis(list);
   return list;
+}
+
+// 在「已由 JSON.stringify(obj, null, 2) 标准格式化」的文本行上，
+// 基于缩进层级 + 括号匹配计算每一行的 JSON 路径（供字段级注释定位）。
+// 只写 line.path / line.kind，绝不参与缩进渲染 —— 缩进由 JSON.stringify 保证，
+// 因此即使路径算法有边角问题，也只影响注释、不会再搞坏排版。
+// line = { indent, raw, path, kind: 'open'|'close'|'leaf' }
+function computeJsonPaths(lines) {
+  const stack = []; // { indent, kind: 'obj'|'arr', prefix, idx }
+  for (const ln of lines) {
+    const trimmed = ln.raw.trim();
+    while (stack.length && stack[stack.length - 1].indent >= ln.indent) stack.pop();
+
+    if (trimmed === "}" || trimmed === "]" || trimmed === "}," || trimmed === "],") { ln.kind = "close"; ln.path = null; continue; }
+
+    const km = trimmed.match(/^("(?:[^"\\]|\\.)*")\s*:\s*([\s\S]*)$/);
+    if (km) {
+      const key = JSON.parse(km[1]);
+      const rest = km[2].trim();
+      const parentPrefix = stack.length ? stack[stack.length - 1].prefix : "";
+      const path = parentPrefix ? parentPrefix + "." + key : key;
+      ln.path = path;
+      if (rest === "{" || rest === "[") {
+        ln.kind = "open";
+        stack.push({ indent: ln.indent, kind: rest === "{" ? "obj" : "arr", prefix: path, idx: 0 });
+      } else {
+        ln.kind = "leaf";
+      }
+      continue;
+    }
+
+    if (stack.length && stack[stack.length - 1].kind === "arr") {
+      const arr = stack[stack.length - 1];
+      const path = arr.prefix ? arr.prefix + "." + arr.idx : String(arr.idx);
+      ln.path = path;
+      const isOpen = trimmed[0] === "{" || trimmed[0] === "[";
+      ln.kind = isOpen ? "open" : "leaf";
+      if (isOpen) {
+        stack.push({ indent: ln.indent, kind: trimmed[0] === "{" ? "obj" : "arr", prefix: path, idx: 0 });
+      }
+      arr.idx++;
+      continue;
+    }
+
+    ln.kind = "leaf";
+    ln.path = null;
+  }
+}
+
+// 对单行 JSON 文本做语法高亮。保持缩进与标点，返回 HTML。
+function highlightJsonLine(line) {
+  const tokens = [];
+  // 字符串 | 数字 | true/false/null | 标点/空白
+  const re = /\s+|"(?:[^"\\]|\\.)*"|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(true|false|null)|[{}[\]:,]/g;
+  let lastIndex = 0;
+  let m;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > lastIndex) tokens.push({ type: "text", value: line.slice(lastIndex, m.index) });
+    const v = m[0];
+    if (/^\s+$/.test(v)) tokens.push({ type: "text", value: v });
+    else if (m[1] !== undefined) tokens.push({ type: "number", value: v });
+    else if (m[2] !== undefined) tokens.push({ type: v === "null" ? "null" : "boolean", value: v });
+    else if (v[0] === '"') tokens.push({ type: "string", value: v });
+    else tokens.push({ type: "punc", value: v });
+    lastIndex = re.lastIndex;
+  }
+  if (lastIndex < line.length) tokens.push({ type: "text", value: line.slice(lastIndex) });
+
+  // 在 key: value 行中，把紧跟 ':' 的字符串标为 key
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (tokens[i].type === "string" && tokens[i + 1].type === "punc" && tokens[i + 1].value === ":") {
+      tokens[i].type = "key";
+    }
+  }
+
+  return tokens.map((t) => {
+    if (t.type === "text") return esc(t.value);
+    return `<span class="j-${t.type}">${esc(t.value)}</span>`;
+  }).join("");
+}
+
+// 统一的 JSON 展示组件（VS Code 风格：左侧 gutter 行号 + 折叠按钮）。
+// opts: { copyRaw, annotations(对象 path->note), annotateTarget("req"|"res"), seq }
+// - 折叠：点击 gutter 的 ▼/▶ 折叠整块 {} / []
+// - 复制：右上角「复制」按钮（通过全局委托处理，任何容器都生效）
+// - 字段注释：传入 annotations 时，每个字段行尾显示 ✎，点击即对该路径加注释
+function renderJsonGutter(text, opts) {
+  opts = opts || {};
+  if (text === null || text === undefined || text === "") return '<div class="json-empty">（空）</div>';
+  let obj = null;
+  try { obj = JSON.parse(typeof text === "string" ? text : JSON.stringify(text)); } catch (e) { obj = null; }
+
+  // 标准格式化：缩进完全由 JSON.stringify 产出，绝不手搓
+  let pretty;
+  let hasPaths = false;
+  if (obj !== null && typeof obj === "object") {
+    pretty = JSON.stringify(obj, null, 2);
+    hasPaths = true;
+  } else {
+    pretty = typeof text === "string" ? text : JSON.stringify(text, null, 2);
+  }
+
+  // 逐行：{ indent, raw(含标准缩进), path, kind }
+  const lines = pretty.split("\n").map((t) => {
+    const m = t.match(/^(\s*)/);
+    return { indent: (m ? m[1].length : 0) / 2, raw: t, path: null, kind: "leaf" };
+  });
+
+  if (hasPaths) computeJsonPaths(lines);
+
+  // 折叠块：基于括号匹配（open 行 → 对应 close 行），与缩进无关，不依赖手搓层级
+  const folds = [];
+  const st = [];
+  lines.forEach((ln, i) => {
+    if (ln.kind === "open") st.push(i);
+    else if (ln.kind === "close" && st.length) {
+      const open = st.pop();
+      folds.push({ start: open + 1, end: i + 1 });
+    }
+  });
+  const foldMap = new Map();
+  folds.forEach((f, idx) => foldMap.set(f.start, idx));
+
+  const pad = String(lines.length).length;
+  const annMap = (hasPaths && opts.annotations && opts.seq != null && opts.annotateTarget)
+    ? opts.annotations : null;
+
+  const body = lines.map((line, idx) => {
+    const lineNo = idx + 1;
+    let gutter = `<span class="json-lineno">${String(lineNo).padStart(pad, " ")}</span>`;
+    const fidx = foldMap.get(lineNo);
+    if (fidx !== undefined) {
+      gutter = `<span class="json-fold" data-start="${folds[fidx].start}" data-end="${folds[fidx].end}">▼</span>` + gutter;
+    }
+    let annHtml = "";
+    if (annMap && line.path) {
+      const note = annMap[line.path];
+      annHtml =
+        `<span class="j-ann-btn" data-ann-seq="${opts.seq}" data-ann-path="${esc(line.path)}" data-ann-target="${esc(opts.annotateTarget)}" title="添加/编辑注释">✎</span>` +
+        (note ? `<span class="j-ann-txt"> // ${esc(note)}</span>` : "");
+    }
+    const lineCls = "json-line" + ((annMap && line.path && annMap[line.path]) ? " j-annotated" : "");
+    const code = (line.raw ? highlightJsonLine(line.raw) : "&nbsp;") + annHtml;
+    return `<div class="${lineCls}" data-line="${lineNo}"><span class="json-gutter">${gutter}</span><span class="json-code">${code}</span></div>`;
+  }).join("");
+
+  const rawForCopy = opts.copyRaw != null ? opts.copyRaw : (typeof text === "string" ? text : JSON.stringify(text, null, 2));
+  const viewer = `<div class="json-viewer code" data-raw="${esc(rawForCopy)}">${body}</div>`;
+  if (opts.copyRaw != null) {
+    return `<div class="code-wrap">` + `<button class="btn-mini code-copy" data-copy>复制</button>` + viewer + `</div>`;
+  }
+  return viewer;
 }
 
 function renderMockApis(list) {
@@ -369,13 +545,36 @@ function renderMockApis(list) {
       </div>
       <div class="mock-group-body">
         ${g.items.map((a) =>
-          `<div class="mock-api-row${a.mock_pin ? " pinned" : ""}" data-seq="${a.seq}">
-            <span class="mock-api-q" title="query：${esc(a.query || "")}">${a.query ? esc(a.query) : "&lt;无 query&gt;"}</span>
-            ${rowMarkHtml(a)}
-            <span class="resp-badge">${esc(String(a.status))}</span>
-            <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}">${a.mock_pin ? "取消默认" : "默认"}</button>
-            <button class="btn btn-sm mock-test-one">测试</button>
-            <pre class="mock-api-result" style="display:none"></pre>
+          `<div class="mock-api-card${a.mock_pin ? " pinned" : ""}" data-seq="${a.seq}">
+            <div class="mock-api-card-head">
+              <div class="mock-api-card-meta">
+                <span class="method-badge m-${esc(String(a.method || "GET").toUpperCase())}">${esc(a.method || "GET")}</span>
+                <span class="mock-api-card-path" title="${esc(a.path)}">${esc(a.path)}</span>
+                <span class="mock-api-card-query" title="query：${esc(a.query || "")}">${a.query ? esc(a.query) : '<span class="muted">&lt;无 query&gt;</span>'}</span>
+              </div>
+              <div class="mock-api-card-ops">
+                ${rowMarkHtml(a)}
+                <span class="resp-badge">${esc(String(a.status))}</span>
+                <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}">${a.mock_pin ? "取消默认" : "默认"}</button>
+                <button class="btn btn-sm mock-test-one">测试</button>
+                <span class="mock-expand-toggle" title="展开/折叠">▼</span>
+              </div>
+            </div>
+            <div class="mock-api-card-body" style="display:none">
+              <div class="mock-api-bodies">
+                <div class="mock-card-section mock-req-section">
+                  <div class="mock-card-section-title">请求体</div>
+                  <div class="mock-card-summary mock-req-summary" title="点击展开/折叠">${a.req_body_preview ? esc(a.req_body_preview) : '<span class="muted">（无请求体）</span>'}</div>
+                  <div class="mock-card-code mock-req-code" style="display:none">${renderJsonGutter(a.req_body_pretty, { copyRaw: a.req_body_pretty })}</div>
+                </div>
+                <div class="mock-card-section mock-res-section">
+                  <div class="mock-card-section-title">返回体</div>
+                  <div class="mock-card-summary mock-res-summary" title="点击展开/折叠">${a.body_preview ? esc(a.body_preview) : '<span class="muted">（无响应体）</span>'}</div>
+                  <div class="mock-card-code mock-res-code" style="display:none">${renderJsonGutter(a.body_pretty, { copyRaw: a.body_pretty })}</div>
+                </div>
+              </div>
+              <pre class="mock-api-result" style="display:none"></pre>
+            </div>
           </div>`
         ).join("")}
       </div>
@@ -390,14 +589,51 @@ function renderMockApis(list) {
     });
   });
   mockApiList.querySelectorAll(".mock-test-one").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const row = btn.closest(".mock-api-row");
-      testMockApi(window.__mockApisBySeq[row.getAttribute("data-seq")], row);
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const card = btn.closest(".mock-api-card");
+      testMockApi(window.__mockApisBySeq[card.getAttribute("data-seq")], card);
     });
   });
   mockApiList.querySelectorAll(".mock-pin-one").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
       pinMockApi(window.__mockApisBySeq[btn.getAttribute("data-seq")], btn);
+    });
+  });
+  // 点击卡片头部展开/折叠整个卡片内容
+  mockApiList.querySelectorAll(".mock-api-card-head").forEach((head) => {
+    head.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      const card = head.closest(".mock-api-card");
+      const body = card.querySelector(".mock-api-card-body");
+      const toggle = head.querySelector(".mock-expand-toggle");
+      const hidden = body.style.display === "none";
+      body.style.display = hidden ? "block" : "none";
+      toggle.textContent = hidden ? "▲" : "▼";
+      card.classList.toggle("expanded", hidden);
+    });
+  });
+  // 点击请求体摘要展开/折叠格式化请求体
+  mockApiList.querySelectorAll(".mock-req-summary").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const code = el.parentElement.querySelector(".mock-req-code");
+      if (!code) return;
+      const hidden = code.style.display === "none";
+      code.style.display = hidden ? "block" : "none";
+      el.classList.toggle("expanded", hidden);
+    });
+  });
+  // 点击返回体摘要展开/折叠格式化返回体
+  mockApiList.querySelectorAll(".mock-res-summary").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const code = el.parentElement.querySelector(".mock-res-code");
+      if (!code) return;
+      const hidden = code.style.display === "none";
+      code.style.display = hidden ? "block" : "none";
+      el.classList.toggle("expanded", hidden);
     });
   });
 }
@@ -415,15 +651,18 @@ async function pinMockApi(api, btn) {
   }
 }
 
-async function testMockApi(api, row) {
-  const pre = row.querySelector(".mock-api-result");
-  const btn = row.querySelector(".mock-test-one");
+async function testMockApi(api, card) {
+  const body = card.querySelector(".mock-api-card-body");
+  const pre = card.querySelector(".mock-api-result");
+  const btn = card.querySelector(".mock-test-one");
+  const toggle = card.querySelector(".mock-expand-toggle");
   btn.disabled = true;
+  body.style.display = "block";
   pre.style.display = "block";
   pre.textContent = "测试中…";
-  const res = await postJSON("/api/mock/test", {
-    method: api.method, path: api.path, query: api.query,
-  });
+  if (toggle) toggle.textContent = "▲";
+  card.classList.add("expanded");
+  const res = await postJSON("/api/mock/test", { seq: api.seq });
   btn.disabled = false;
   if (res && res.data) {
     const d = res.data;
@@ -477,6 +716,9 @@ function renderMockLogs() {
     .map((l, i) => {
       const sc = l.status >= 400 ? "s-4" : (l.status >= 300 ? "s-3" : (l.matched ? "s-2" : "s-fail"));
       const miss = l.matched ? "" : `<span class="badge miss">未命中</span>`;
+      const missWhy = l.miss_reason
+        ? `<span class="miss-reason" title="${esc(l.miss_reason)}">${esc(l.miss_reason.length > 40 ? l.miss_reason.slice(0, 40) + "…" : l.miss_reason)}</span>`
+        : "";
       return (
         `<div class="mock-log-row" data-i="${i}">` +
         `<span class="log-ts">${fmtTime(l.ts)}</span>` +
@@ -484,6 +726,7 @@ function renderMockLogs() {
         `<span class="s ${sc}">${esc(String(l.status))}</span>` +
         `<span class="path-text" title="${esc(l.url || "")}">${esc(l.path || "/")}${l.query ? "?" + esc(l.query) : ""}</span>` +
         miss +
+        missWhy +
         `</div>`
       );
     })
@@ -496,17 +739,21 @@ function renderMockLogs() {
 function showMockLogDetail(log) {
   if (!log || !mockLogModal) return;
   const miss = log.matched ? "" : `<span style="color:#A32D2D">未命中（返回 404）</span>`;
+  const missWhy = log.miss_reason
+    ? `<div class="mock-log-miss">未命中原因：${esc(log.miss_reason)}</div>`
+    : "";
   const reqHdr = log.req_headers && Object.keys(log.req_headers).length
     ? kvTable(log.req_headers)
     : `<div class="note">无请求头</div>`;
   const resHdr = log.res_headers && Object.keys(log.res_headers).length
     ? kvTable(log.res_headers)
     : `<div class="note">无响应头</div>`;
-  const reqBody = log.req_body ? codeBlock(pretty(log.req_body)) : `<div class="note">无请求体</div>`;
-  const resBody = log.res_body ? codeBlock(pretty(log.res_body)) : `<div class="note">空响应体</div>`;
+  const reqBody = log.req_body ? renderJsonGutter(pretty(log.req_body), { copyRaw: log.req_body }) : `<div class="note">无请求体</div>`;
+  const resBody = log.res_body ? renderJsonGutter(pretty(log.res_body), { copyRaw: log.res_body }) : `<div class="note">空响应体</div>`;
   mockLogModalBody.innerHTML =
     `<div class="mock-log-sec"><div class="mock-log-sec-title">请求</div>` +
     `<div class="mock-log-url">${esc(log.method)} ${esc(log.url || "")}</div>` +
+    missWhy +
     `<div class="mock-log-sub">请求头</div>${reqHdr}` +
     `<div class="mock-log-sub">请求体</div>${reqBody}</div>` +
     `<div class="mock-log-sec"><div class="mock-log-sec-title">响应 ${esc(String(log.status))} ${miss}</div>` +
@@ -518,9 +765,32 @@ function showMockLogDetail(log) {
 if (mockLogsRefreshBtn) mockLogsRefreshBtn.addEventListener("click", loadMockLogs);
 if (mockLogModal) {
   $("mockLogModalClose").addEventListener("click", () => mockLogModal.classList.add("hide"));
-  mockLogModal.addEventListener("click", (e) => { if (e.target === mockLogModal) mockLogModal.classList.add("hide"); });
+  mockLogModal.addEventListener("click", (e) => {
+    if (e.target === mockLogModal) mockLogModal.classList.add("hide");
+  });
 }
-if (mockLogList) loadMockLogs();  // 页面加载时先拉一次（进程内 Mock 不随刷新消失）
+if (mockLogList) loadMockLogs();  // 页面加载时先拉一次（进程内 Mock 不随刷新消失}
+
+// Sync strict mode on page load
+document.addEventListener("DOMContentLoaded", () => {
+  // 用 GET 读取当前配置（注意：不能用 POST {}，否则后端会把已保存的端口清空）
+  fetch("/api/config").then((r) => r.json()).then((d) => {
+    if (d) {
+      mockStrictMode = d.match_mode !== false;
+      updateStrictModeUI();
+    }
+  });
+  
+  // 开关变更事件
+  if (mockStrictToggleEl) {
+    mockStrictToggleEl.addEventListener("change", () => {
+      mockStrictMode = mockStrictToggleEl.checked;
+      syncMockStrictMode();
+    });
+  }
+});
+
+// ---------------- Mock 接口列表（内联在 Mock tab）+ 快速测试 ----------------
 
 // ---------------- 渲染树 ----------------
 function scheduleRender() {
@@ -754,22 +1024,32 @@ function renderDetail(rec) {
     markSaveBtn.addEventListener("click", () => {
       const tagsRaw = ($("markTagsInput") && $("markTagsInput").value) || "";
       const tags = tagsRaw.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+      const note = ($("markNoteInput") && $("markNoteInput").value) || "";
       markSaveBtn.disabled = true;
-      postJSON("/api/request/mark", { seq: rec.seq, tags })
+      // 写接口级文档（与请求库共享），按 method+path 定位
+      postJSON("/api/endpoint/doc", { method: rec.method, path: rec.path, tags, note })
         .then((res) => {
           if (res.ok && res.data && res.data.ok) {
-            if (currentDetail) { currentDetail.tags = tags; }
-            // 树由后端广播 snapshot 刷新（标记图标）；详情本地已更新
+            if (currentDetail) currentDetail.tags = tags;
             markSaveBtn.textContent = "已保存 ✓";
             setTimeout(() => { markSaveBtn.textContent = "保存"; }, 1200);
+            if (window.refreshEndpointDocs) window.refreshEndpointDocs();
           } else {
-            alert("保存标签失败：" + ((res.data && res.data.error) || "未知错误"));
+            alert("保存失败：" + ((res.data && res.data.error) || "未知错误"));
           }
         })
-        .catch((e) => alert("保存标签失败：" + e))
+        .catch((e) => alert("保存失败：" + e))
         .finally(() => { markSaveBtn.disabled = false; });
     });
   }
+  // 回填接口级标签/备注（与请求库共享）
+  postJSON("/api/endpoint/doc", { method: rec.method, path: rec.path }).then((r) => {
+    if (r.ok && r.data && r.data.ok && r.data.doc) {
+      const d = r.data.doc;
+      const ti = $("markTagsInput"); if (ti && d.tags) ti.value = d.tags.join(", ");
+      const ni = $("markNoteInput"); if (ni) ni.value = d.note || "";
+    }
+  }).catch(() => {});
 
   const dlBtn = $("downloadFileBtn");
   if (dlBtn) {
@@ -805,8 +1085,8 @@ function renderDetail(rec) {
   }
 }
 
-function tabBtn(key, label) {
-  return `<div class="tab${key === currentTab ? " active" : ""}" data-tab="${key}">${label}</div>`;
+function tabBtn(key, label, activeKey) {
+  return `<div class="tab${key === (activeKey || currentTab) ? " active" : ""}" data-tab="${key}">${label}</div>`;
 }
 
 function kvTable(obj) {
@@ -839,7 +1119,13 @@ function renderTab(rec, which) {
   if (which === "req-body") {
     const t = rec.request && rec.request.post_data;
     if (t == null) return `<div class="note">无请求体</div>`;
-    return jsonOrCode(t, rec, "req");
+    const raw = typeof t === "string" ? t : JSON.stringify(t, null, 2);
+    return renderJsonGutter(raw, {
+      copyRaw: raw,
+      annotations: (rec.annotations && rec.annotations.req) || {},
+      annotateTarget: "req",
+      seq: rec.seq,
+    });
   }
   if (which === "res-headers") return kvTable(rec.response && rec.response.headers);
   if (which === "res-body") {
@@ -849,7 +1135,13 @@ function renderTab(rec, which) {
       if ((r.body_size || 0) > 0) return `<div class="note">二进制响应体（大小 ${fmtSize(r.body_size)}），未捕获原文。</div>`;
       return `<div class="note">无响应体</div>`;
     }
-    return jsonOrCode(t, rec, "res") + (r.truncated ? `<div class="note">⚠ 内容已截断，完整内容见导出的 HAR / JSON。</div>` : "");
+    const raw = typeof t === "string" ? t : JSON.stringify(t, null, 2);
+    return renderJsonGutter(raw, {
+      copyRaw: raw,
+      annotations: (rec.annotations && rec.annotations.res) || {},
+      annotateTarget: "res",
+      seq: rec.seq,
+    }) + (r.truncated ? `<div class="note">⚠ 内容已截断，完整内容见导出的 HAR / JSON。</div>` : "");
   }
   if (which === "query") {
     if (!rec.query) return `<div class="note">无 Query 参数</div>`;
@@ -862,98 +1154,31 @@ function renderTab(rec, which) {
   return "";
 }
 
-// ---------------- 标记（记录级备注 + 标签）----------------
+// ---------------- 标记（接口级备注 + 标签，与请求库共享同一份）----------------
 function tagsEditorHtml(rec) {
-  const tags = (rec.tags || []).join(", ");
   return (
     `<div class="tags-bar">` +
-    `<span class="tags-label">标签</span>` +
-    `<input id="markTagsInput" class="input tags-input" placeholder="登录, 核心" value="${esc(tags)}" />` +
+    `<span class="tags-label">接口标签</span>` +
+    `<input id="markTagsInput" class="input tags-input" placeholder="登录, 核心" value="">` +
     `<button class="btn-mini" id="markSaveBtn">保存</button>` +
-    `</div>`
-  );
-}
-
-// ---------------- 字段级注释：JSON 树渲染 ----------------
-function jsonOrCode(text, rec, target) {
-  let obj = null;
-  try { obj = JSON.parse(text); } catch (e) { /* 非 JSON，按原样文本渲染 */ }
-  if (obj === null || typeof obj !== "object") return codeBlock(text);
-  const ann = (rec.annotations && rec.annotations[target]) || {};
-  const raw = JSON.stringify(obj, null, 2);
-  return (
-    `<div class="code-wrap">` +
-    `<div class="jtree-toolbar">` +
-    `<button class="btn-mini" data-tree-collapse="all" title="折叠所有 {} / []">⊟ 全部折叠</button>` +
-    `<button class="btn-mini" data-tree-collapse="none" title="展开所有 {} / []">⊞ 全部展开</button>` +
-    `<button class="btn-mini code-copy" data-copy>复制</button>` +
     `</div>` +
-    `<div class="code jtree" data-raw="${esc(raw)}">` +
-    jsonTreeHtml(obj, "", ann, target) +
-    `</div></div>`
+    `<div class="tags-bar">` +
+    `<span class="tags-label">接口备注</span>` +
+    `<input id="markNoteInput" class="input tags-input" placeholder="接口级备注（与请求库共享）" value="">` +
+    `</div>` +
+    `<div class="note-hint">标签 / 备注为接口级，录制与请求库共享同一份</div>`
   );
 }
 
-function jsonTreeHtml(v, path, ann, target) {
-  const note = ann[path];
-  const cls = note ? " j-annotated" : "";
-  const noteTxt = note ? `<span class="j-note-txt"> // ${esc(note)}</span>` : "";
-  const btn = `<span class="j-note-btn" data-ann-path="${esc(path)}" data-ann-target="${target}" title="添加/编辑注释">✎</span>`;
-  // 复制「该节点」JSON 的按钮：把当前值序列化后塞进 data 属性，点击即复制这一段
-  const copyBtn = `<span class="j-copy-btn" data-copy-node="${esc(JSON.stringify(v, null, 2))}" title="复制该节点 JSON">⧉</span>`;
-
-  // 标量 / null：用 span 行内，避免被外层 key 行 div 强制换行
-  if (v === null) {
-    return `<span class="jline jval-null${cls}"><span class="j-null">null</span>${noteTxt}${copyBtn}${btn}</span>`;
-  }
-  const t = typeof v;
-  if (t === "string" || t === "number" || t === "boolean") {
-    return `<span class="jline jval-${t}${cls}"><span class="j-${t}">${hl(String(v))}</span>${noteTxt}${copyBtn}${btn}</span>`;
-  }
-
-  // 数组 / 对象：容器本身用 div 整行，支持折叠
-  if (Array.isArray(v)) {
-    if (v.length === 0) {
-      return `<div class="jline${cls}"><span class="j-punc">[]</span>${noteTxt}${copyBtn}${btn}</div>`;
-    }
-    let h = `<div class="jnode${cls}">` +
-      `<div class="jline j-open"><span class="j-toggle" title="折叠/展开">▾</span>` +
-      `<span class="j-punc">[</span><span class="j-preview"> … ${v.length} 项</span>${noteTxt}${copyBtn}${btn}</div>` +
-      `<div class="jind">`;
-    v.forEach((item, i) => { h += jsonTreeHtml(item, path ? path + "." + i : String(i), ann, target); });
-    h += `</div><div class="jline j-close"><span class="j-punc">]</span></div></div>`;
-    return h;
-  }
-  // object
-  const keys = Object.keys(v);
-  if (keys.length === 0) {
-    return `<div class="jline${cls}"><span class="j-punc">{}</span>${noteTxt}${copyBtn}${btn}</div>`;
-  }
-  let h = `<div class="jnode${cls}">` +
-    `<div class="jline j-open"><span class="j-toggle" title="折叠/展开">▾</span>` +
-    `<span class="j-punc">{</span><span class="j-preview"> … ${keys.length} 项</span>${noteTxt}${copyBtn}${btn}</div>` +
-    `<div class="jind">`;
-  keys.forEach((k) => {
-    const childPath = path ? path + "." + k : k;
-    h += `<div class="jline">` +
-      `<span class="j-key">${hl(JSON.stringify(k))}</span><span class="j-punc">: </span>` +
-      jsonTreeHtml(v[k], childPath, ann, target) +
-      `</div>`;
-  });
-  h += `</div><div class="jline j-close"><span class="j-punc">}</span></div></div>`;
-  return h;
-}
-
-function annotateField(rec, path, target) {
-  if (mockRunning) { alert("Mock 运行中，录制库已锁定；请先停止 Mock 再编辑注释。"); return; }
-  const ann = (rec.annotations && rec.annotations[target]) || {};
-  const old = ann[path] || "";
-  const note = prompt(old ? "编辑注释（清空后确定 = 删除）：" : "添加注释：", old);
+// ---------------- 字段级注释：保存并刷新 ----------------
+// 与 backend /api/request/annotate 对齐：target 用 "req" / "res"
+function annotateSeq(seq, target, path) {
+  const note = prompt("添加/编辑注释（清空后确定 = 删除）：", "");
   if (note === null) return;
-  postJSON("/api/request/annotate", { seq: rec.seq, target, path, note })
+  postJSON("/api/request/annotate", { seq, target, path, note })
     .then((res) => {
       if (res.ok && res.data && res.data.ok) {
-        openDetail(rec.seq);  // 重新拉完整记录，刷新注释展示
+        openDetail(seq);  // 重新拉完整记录，刷新注释展示
       } else {
         alert("保存注释失败：" + ((res.data && res.data.error) || "未知错误"));
       }
@@ -963,7 +1188,6 @@ function annotateField(rec, path, target) {
 
 // ---------------- 编辑请求（造数据：改 URL / 请求头 / 请求体）----------------
 function openEditReq(rec) {
-  if (mockRunning) { alert("Mock 运行中，录制库已锁定；请先停止 Mock 再编辑。"); return; }
   const modal = $("editReqModal");
   if (!modal) return;
   $("editReqUrl").value = rec.url || "";
@@ -1004,49 +1228,15 @@ function wireEditReqModal() {
   });
 }
 
-// ---------------- 详情内「复制」按钮（请求体 / 响应体）----------------
-// 用可靠的剪贴板路径，绕开 WebView2 下「选中后 Ctrl+C / 右键复制」不稳定的问题。
+// ---------------- 详情内「复制请求地址」按钮 ----------------
+// 折叠 / 复制 JSON / 字段注释 由全局委托（wireGlobalJsonInteractions）统一处理，
+// 这样不论 JSON 渲染在详情页、Mock 卡片还是 Mock 日志弹窗，交互都生效。
 detailEl.addEventListener("click", (e) => {
-  const nb = e.target.closest("[data-ann-path]");
-  if (nb && currentDetail) {
-    e.stopPropagation();
-    annotateField(currentDetail, nb.getAttribute("data-ann-path"), nb.getAttribute("data-ann-target"));
-    return;
-  }
-  // 复制「该节点」JSON：点 ⧉ 只复制这一段（对象/数组整块或叶子值），不影响整棵树复制
-  const nodeCopy = e.target.closest("[data-copy-node]");
-  if (nodeCopy && currentDetail) {
-    e.stopPropagation();
-    copyText(nodeCopy.getAttribute("data-copy-node"), nodeCopy);
-    return;
-  }
-  // JSON 树折叠：点击 {} / [] 的开关行（含 ▾ 箭头与收尾括号行）切换折叠
-  const toggle = e.target.closest(".j-open, .j-close");
-  if (toggle && !e.target.closest(".j-note-btn, .j-note-txt, .j-copy-btn")) {
-    const node = toggle.closest(".jnode");
-    if (node) node.classList.toggle("collapsed");
-    return;
-  }
-  // 全部折叠 / 全部展开
-  const treeToggle = e.target.closest("[data-tree-collapse]");
-  if (treeToggle) {
-    const collapse = treeToggle.getAttribute("data-tree-collapse") === "all";
-    const tree = treeToggle.closest(".code-wrap") && treeToggle.closest(".code-wrap").querySelector(".jtree");
-    if (tree) tree.querySelectorAll(".jnode").forEach((n) => n.classList.toggle("collapsed", collapse));
-    return;
-  }
   const copyUrlBtn = e.target.closest("[data-copy-url]");
   if (copyUrlBtn && currentDetail) {
+    e.stopPropagation();
     copyText(currentDetail.url || "", copyUrlBtn);
-    return;
   }
-  const btn = e.target.closest("[data-copy]");
-  if (!btn) return;
-  const wrap = btn.closest(".code-wrap");
-  const pre = wrap && wrap.querySelector(".code");
-  if (!pre) return;
-  const raw = pre.getAttribute("data-raw");
-  copyText(raw != null ? raw : pre.textContent, btn);
 });
 
 function copyText(text, btn) {
@@ -1080,6 +1270,59 @@ function fallbackCopy(text, ok) {
   alert("复制失败，请手动选中文本后按 Ctrl+C");
 }
 
+// ---------------- 全局 JSON 交互委托 ----------------
+// 折叠 / 复制 / 字段注释 统一在 document 上委托，
+// 这样无论 JSON 渲染在详情页、Mock 卡片还是 Mock 日志弹窗，交互都生效，
+// 不再依赖各容器单独调用 wireJsonFolds。
+function wireGlobalJsonInteractions() {
+  document.addEventListener("click", (e) => {
+    // 1) 折叠：gutter 的 ▼/▶
+    const fold = e.target.closest(".json-fold");
+    if (fold) {
+      e.stopPropagation();
+      const start = Number(fold.getAttribute("data-start"));
+      const end = Number(fold.getAttribute("data-end"));
+      const viewer = fold.closest(".json-viewer");
+      if (!viewer) return;
+      const collapsed = fold.classList.toggle("collapsed");
+      fold.textContent = collapsed ? "▶" : "▼";
+      for (let i = start + 1; i < end; i++) {
+        const line = viewer.querySelector(`.json-line[data-line="${i}"]`);
+        if (line) line.classList.toggle("fold-hidden", collapsed);
+      }
+      return;
+    }
+    // 2) 字段级注释：✎
+    const ann = e.target.closest("[data-ann-path]");
+    if (ann) {
+      e.stopPropagation();
+      const seq = Number(ann.getAttribute("data-ann-seq"));
+      const path = ann.getAttribute("data-ann-path");
+      const target = ann.getAttribute("data-ann-target");
+      if (seq && target) annotateSeq(seq, target, path);
+      return;
+    }
+    // 3) 复制：code-copy 按钮
+    const copy = e.target.closest("[data-copy]");
+    if (copy) {
+      e.stopPropagation();
+      const wrap = copy.closest(".code-wrap");
+      if (!wrap) return;
+      const viewer = wrap.querySelector(".json-viewer");
+      if (viewer && viewer.hasAttribute("data-raw")) {
+        copyText(viewer.getAttribute("data-raw"), copy);
+        return;
+      }
+      const pre = wrap.querySelector(".code");
+      if (pre) {
+        const raw = pre.getAttribute("data-raw");
+        copyText(raw != null ? raw : pre.textContent, copy);
+      }
+      return;
+    }
+  });
+}
+
 // ---------------- 工具栏 ----------------
 function postJSON(url, body) {
   return fetch(url, {
@@ -1111,49 +1354,19 @@ function showExportToast(path) {
   $("exportCopyBtn").addEventListener("click", () => {
     const t = path;
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(t).then(() => alert("已复制路径")).catch(() => fallbackCopy(t));
+      navigator.clipboard.writeText(t).then(() => alert("已复制路径")).catch(() => fallbackCopyPath(t));
     } else {
-      fallbackCopy(t);
+      fallbackCopyPath(t);
     }
   });
 }
 
-function fallbackCopy(text) {
+function fallbackCopyPath(text) {
   const ta = document.createElement("textarea");
   ta.value = text; document.body.appendChild(ta); ta.select();
   try { document.execCommand("copy"); alert("已复制路径"); }
   catch (e) { alert("复制失败：" + text); }
   ta.remove();
-}
-
-function exportSave(fmt) {
-  const body = { format: fmt };
-  if (desensitizeEl.checked) {
-    body.desensitize = 1;
-    const cjk = maskCjkEl.value.trim();
-    const digit = maskDigitEl.value.trim();
-    const alpha = maskAlphaEl.value.trim();
-    if (cjk) body.cjk = cjk;
-    if (digit) body.digit = digit;
-    if (alpha) body.alpha = alpha;
-  }
-  return postJSON("/api/export/save", body).then((r) => {
-    if (r.ok && r.data && r.data.ok) {
-      showExportToast(r.data.path);
-    } else {
-      alert("导出失败：" + ((r.data && r.data.error) || "未知错误"));
-    }
-  }).catch((e) => alert("导出失败：" + e));
-}
-
-function exportMockSave() {
-  return postJSON("/api/export_mock/save", {}).then((r) => {
-    if (r.ok && r.data && r.data.ok) {
-      showExportToast(r.data.path);
-    } else {
-      alert("生成失败：" + ((r.data && r.data.error) || "未知错误"));
-    }
-  }).catch((e) => alert("生成失败：" + e));
 }
 
 // 详情区「下载文件」：把单条响应体落盘到 EXPORT_DIR，与导出走同一套可靠路径
@@ -1165,35 +1378,6 @@ function downloadFileSave(filename, content) {
       alert("下载失败：" + ((r.data && r.data.error) || "未知错误"));
     }
   }).catch((e) => alert("下载失败：" + e));
-}
-
-// ---------------- 打开 / 保存 ----------------
-// 受浏览器安全限制，HTML <input type=file> 拿不到完整本地路径，故不再做「打开即关联源文件、
-// 保存覆盖原文件」。导入/打开统一走浏览器原生文件选择，保存/导出走浏览器原生下载。
-const openBtn = $("openBtn");
-const saveBtn = $("saveBtn");
-
-if (openBtn) {
-  // 「打开」与「导入」走同一套浏览器原生文件选择（可靠、跨后端一致）；
-  // 受浏览器安全限制，HTML <input type=file> 拿不到完整本地路径，故不再关联源文件做「覆盖保存」。
-  openBtn.addEventListener("click", () => {
-    try {
-      importFile.click();
-    } catch (e) {
-      alert("无法打开文件选择框：" + e.message);
-    }
-  });
-}
-
-if (saveBtn) {
-  saveBtn.addEventListener("click", () => {
-    saveBtn.disabled = true;
-    const oldText = saveBtn.textContent;
-    saveBtn.textContent = "保存中…";
-    exportSave("har")
-      .catch((e) => alert("保存失败：" + e))
-      .finally(() => { saveBtn.disabled = false; saveBtn.textContent = oldText; });
-  });
 }
 
 startBtn.addEventListener("click", () => {
@@ -1226,96 +1410,63 @@ clearBtn.addEventListener("click", () => {
   postJSON("/api/clear", {});
 });
 
-const desensitizeEl = $("desensitize");
+let desensitizeEl = $("desensitize");
 const localBrowserEl = $("localBrowser");
 const localBrowserField = $("localBrowserField");
-const maskCjkEl = $("maskCjk");
-const maskDigitEl = $("maskDigit");
-const maskAlphaEl = $("maskAlpha");
-const portInputEl = $("portInput");
-const mockPortInputEl = $("mockPortInput");
+let maskCjkEl = $("maskCjk");
+let maskDigitEl = $("maskDigit");
+let maskAlphaEl = $("maskAlpha");
+let portInputEl = $("portInput");
+let mockPortInputEl = $("mockPortInput");
 const mockPortInput2El = $("mockPortInput2");
-const portHintEl = $("portHint");
+let portHintEl = $("portHint");
 const MASK_KEY = "api_recorder_mask_cfg";
 
 function loadMaskCfg() {
   let cfg = {};
   try { cfg = JSON.parse(localStorage.getItem(MASK_KEY) || "{}"); } catch (e) { cfg = {}; }
-  maskCjkEl.value = cfg.cjk != null ? cfg.cjk : "测";
-  maskDigitEl.value = cfg.digit != null ? cfg.digit : "1";
-  maskAlphaEl.value = cfg.alpha != null ? cfg.alpha : "a";
+  if (maskCjkEl) maskCjkEl.value = cfg.cjk != null ? cfg.cjk : "测";
+  if (maskDigitEl) maskDigitEl.value = cfg.digit != null ? cfg.digit : "1";
+  if (maskAlphaEl) maskAlphaEl.value = cfg.alpha != null ? cfg.alpha : "a";
 }
 function savePortCfg() {
   // 端口 / Mock 端口：写到后端 config.json（服务端口需重启生效；Mock 端口下次启动生效）
-  const raw = portInputEl.value.trim();
+  // 注意：go('settings') 每次进入都会 renderSettings() 重新渲染设置页，模块级缓存的
+  // portInputEl/mockPortInputEl 指向已脱离文档的旧节点（值恒为空），必须实时查询当前 DOM。
+  const pi = $("portInput");
+  const mi = $("mockPortInput");
+  const raw = pi ? pi.value.trim() : "";
   const port = raw === "" ? null : raw;
-  const mraw = mockPortInputEl.value.trim();
+  const mraw = mi ? mi.value.trim() : "";
   const mock_port = mraw === "" ? null : mraw;
   postJSON("/api/config", { port, mock_port }).then((res) => {
     if (!res.ok || !res.data || !res.data.ok) {
       alert("配置保存失败：" + ((res.data && res.data.error) || ""));
-    } else {
-      // 同步回填 Mock 页输入框，避免两处不一致
-      if (mock_port) mockPortInput2El.value = mock_port;
-      alert("设置已保存。服务端口修改需重启本程序后生效；Mock 端口下次启动生效。");
+      return;
     }
+    // 同步回填 Mock 页输入框，避免两处不一致
+    if (mock_port && mockPortInput2El) mockPortInput2El.value = mock_port;
+    const btn = $("maskSave");
+    if (btn) { const t = btn.textContent; btn.textContent = "已保存 ✓"; btn.disabled = true; setTimeout(() => { btn.textContent = t; btn.disabled = false; }, 1200); }
+    const saved = [port ? "服务端口 " + port : null, mock_port ? "Mock 端口 " + mock_port : null].filter(Boolean).join("、");
+    alert("设置已保存：" + (saved || "（均留空 = 自动）") + "\n服务端口修改需重启本程序后生效；Mock 端口下次启动 Mock 时生效。");
   }).catch((e) => alert("配置保存失败：" + e));
-  $("maskPanel").classList.add("hide");
 }
 // 脱敏规则：输入即存 localStorage（配置面板不放脱敏，导出弹窗里改即持久化）
 function persistMaskCfg() {
   const cfg = { cjk: maskCjkEl.value, digit: maskDigitEl.value, alpha: maskAlphaEl.value };
   localStorage.setItem(MASK_KEY, JSON.stringify(cfg));
 }
-$("maskSettingsBtn").addEventListener("click", () => $("maskPanel").classList.toggle("hide"));
-$("maskSave").addEventListener("click", savePortCfg);
-[maskCjkEl, maskDigitEl, maskAlphaEl].forEach((el) => el.addEventListener("input", persistMaskCfg));
 // 默认预填，保证不改配置时行为与之前一致
 loadMaskCfg();
-// 读取已保存端口（若有）回填到输入框，并显示当前运行端口
-fetch("/api/config").then((r) => r.json()).then((d) => {
-  if (d && d.saved_port) portInputEl.value = d.saved_port;
-  if (d && d.mock_port) {
-    mockPortInputEl.value = d.mock_port;
-    mockPortInput2El.value = d.mock_port;
-  }
-  if (d && d.running_port) portHintEl.textContent = "当前运行端口：" + d.running_port + "；修改后需重启本程序生效。留空 = 自动选择。";
-}).catch(() => {});
+// 端口回填 / 脱敏输入绑定延后到 init（设置屏渲染后）执行，见文件末尾
 
-function exportUrl(fmt) {
-  return exportSave(fmt)
-    .catch((e) => { alert("导出失败：" + e.message); throw e; });
-}
-
-// 导出 Mock 脚本：生成并落盘到 EXPORT_DIR
-function exportMockScript() {
-  return exportMockSave()
-    .catch((e) => { alert("生成失败：" + e.message); throw e; });
-}
-
-// 弹窗「导出 / Mock」：开关弹窗 + 按所选格式导出
+// 导出按钮 → 跳转「导出」独立模块（统一在导出页完成格式/范围/脱敏/预览）
 const exportBtn = $("exportBtn");
-const exportModal = $("exportModal");
-const doExportBtn = $("doExportBtn");
-
-function closeExportModal() { exportModal.classList.add("hide"); }
-exportBtn.addEventListener("click", () => exportModal.classList.remove("hide"));
-$("exportModalClose").addEventListener("click", closeExportModal);
-exportModal.addEventListener("click", (e) => { if (e.target === exportModal) closeExportModal(); });
+if (exportBtn) exportBtn.addEventListener("click", () => go("export"));
 
 wireEditReqModal();
-
-doExportBtn.addEventListener("click", () => {
-  const sel = document.querySelector('input[name="exportFormat"]:checked');
-  const fmt = sel ? sel.value : "har";
-  doExportBtn.disabled = true;
-  const oldText = doExportBtn.textContent;
-  doExportBtn.textContent = "导出中…";
-  const task = fmt === "mock" ? exportMockScript() : exportUrl(fmt);
-  task
-    .catch(() => {})
-    .finally(() => { doExportBtn.disabled = false; doExportBtn.textContent = oldText; });
-});
+wireGlobalJsonInteractions();
 
 const importBtn = $("importBtn");
 const importFile = $("importFile");
@@ -1336,8 +1487,8 @@ importFile.addEventListener("change", () => {
   const names = Array.from(files).map((f) => f.name);
   const tip =
     files.length === 1
-      ? "导入将覆盖当前已录制的全部请求，继续？"
-      : `导入将覆盖当前已录制的全部请求，并合并导入 ${files.length} 个文件：\n${names.join("\n")}\n\n继续？`;
+      ? "导入将增量合并到当前库（按请求体+返回体自动去重），继续？"
+      : `导入将增量合并到当前库（按请求体+返回体自动去重），并合并导入 ${files.length} 个文件：\n${names.join("\n")}\n\n继续？`;
   if (!confirm(tip)) {
     importFile.value = "";
     return;
@@ -1349,8 +1500,9 @@ importFile.addEventListener("change", () => {
     .then((r) => r.json().then((d) => ({ ok: r.ok, data: d })))
     .then((res) => {
       if (res.ok && res.data && res.data.ok) {
+        const dup = res.data.duplicates ? `，去重 ${res.data.duplicates} 条` : "";
         alert(
-          `导入成功：${res.data.kind} 共 ${res.data.count} 条` +
+          `导入成功：${res.data.kind} 共 ${res.data.count} 条${dup}` +
             `（${res.data.files || 1} 个文件，左侧已刷新）`
         );
       } else {
@@ -1520,22 +1672,860 @@ if (sortByEl) {
   });
 }
 
-// ---------------- Tab 切换（API 录制 / Mock 服务，互不干扰）----------------
-const panelApi = $("panelApi");
-const panelMock = $("panelMock");
-function switchTab(name) {
-  const isApi = name === "api";
-  panelApi.classList.toggle("hide", !isApi);
-  panelMock.classList.toggle("hide", isApi);
-  document.querySelectorAll(".tab-switch").forEach((b) =>
-    b.classList.toggle("active", b.getAttribute("data-tab") === name)
-  );
-  // Mock tab 打开时刷新接口列表（内联展示，无需弹窗）
-  if (!isApi) loadMockApis();
+// ---------------- 侧边导航 + 多屏切换 ----------------
+const SCREENS = ["overview", "recording", "mock", "library", "export", "settings"];
+const TITLES = {
+  overview: ["概览", "录制 · Mock · 请求库 一体化视图"],
+  recording: ["录制", "拉起浏览器，按域名实时组织所有请求"],
+  mock: ["Mock 服务", "基于录制库启动进程内 Mock，供被测程序对接"],
+  library: ["请求库", "按归属 / 端点组织的 API 清单与可编辑文档"],
+  export: ["导出", "将录制库导出为多种格式，支持脱敏与范围筛选"],
+  settings: ["设置", "端口 / 脱敏 / 浏览器内核"],
+};
+const screenEls = {};
+SCREENS.forEach((s) => { screenEls[s] = document.querySelector(`.screen[data-screen="${s}"]`); });
+const topTitle = $("topTitle");
+const topSub = $("topSub");
+
+function go(screen) {
+  if (!SCREENS.includes(screen)) screen = "recording";
+  SCREENS.forEach((s) => { const el = screenEls[s]; if (el) el.classList.toggle("active", s === screen); });
+  document.querySelectorAll(".nav-item").forEach((n) =>
+    n.classList.toggle("active", n.getAttribute("data-go") === screen));
+  const t = TITLES[screen];
+  if (topTitle) topTitle.textContent = t[0];
+  if (topSub) topSub.textContent = t[1];
+  if (screen === "overview") renderOverview();
+  else if (screen === "library") renderLibrary();
+  else if (screen === "export") renderExport();
+  else if (screen === "settings") renderSettings();
+  else if (screen === "mock") loadMockApis();
+  if (screen === "recording") render();
+  updateNavBadges();
 }
-document.querySelectorAll(".tab-switch").forEach((b) => {
-  b.addEventListener("click", () => switchTab(b.getAttribute("data-tab")));
+
+function updateNavBadges() {
+  const recB = $("navRecBadge"); const mockB = $("navMockBadge");
+  if (recB) recB.textContent = String(allRequests.length);
+  if (mockB) mockB.textContent = String((window.__mockApis || []).length);
+  const dot = $("navRecDot"); const txt = $("navRecText");
+  if (dot && txt) {
+    dot.classList.toggle("live", recordingActive);
+    txt.textContent = recordingActive ? "录制中" : (mockRunning ? "Mock 运行中" : "空闲");
+  }
+}
+
+document.querySelectorAll(".nav-item").forEach((n) => {
+  n.addEventListener("click", () => go(n.getAttribute("data-go")));
 });
 
-// ---------------- 启动 ----------------
+// ---------------- 概览 ----------------
+function renderOverview() {
+  const pad = $("overviewPad");
+  if (!pad) return;
+  const total = allRequests.length;
+  const domains = new Set(allRequests.map((r) => r.registered_domain || r.host)).size;
+  const apis = allRequests.filter((r) => ["XHR", "FETCH"].includes((r.resource_type || "").toUpperCase())).length;
+  const errors = allRequests.filter((r) => r.is_failed || (r.response && r.response.status >= 400)).length;
+  const mockCount = (window.__mockApis || []).length;
+  const rec = allRequests.slice(-8).reverse();
+  pad.innerHTML =
+    `<div class="stat-grid">
+      <div class="stat-card"><div class="stat-ic">📡</div><div><div class="stat-num">${total}</div><div class="stat-label">录制请求</div></div></div>
+      <div class="stat-card"><div class="stat-ic">🌐</div><div><div class="stat-num">${domains}</div><div class="stat-label">归属域</div></div></div>
+      <div class="stat-card"><div class="stat-ic">🔌</div><div><div class="stat-num">${apis}</div><div class="stat-label">API 调用</div></div></div>
+      <div class="stat-card"><div class="stat-ic">🧪</div><div><div class="stat-num">${mockCount}</div><div class="stat-label">Mock 接口</div></div></div>
+      <div class="stat-card"><div class="stat-ic">⚠️</div><div><div class="stat-num">${errors}</div><div class="stat-label">错误响应</div></div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">快捷操作</div>
+      <div class="quick-actions">
+        <button class="btn btn-primary" id="ovStart">● 开始录制</button>
+        <button class="btn" id="ovMock">▶ 启动 Mock</button>
+        <button class="btn" id="ovLib">📚 打开请求库</button>
+        <button class="btn" id="ovExport">📤 导出</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">最近活动</div>
+      <div class="lib-list" id="ovRecent">${rec.length ? "" : '<div class="empty">暂无录制，去「录制」页开始吧。</div>'}</div>
+    </div>`;
+  const ovStart = $("ovStart"); if (ovStart) ovStart.addEventListener("click", () => { go("recording"); if (!recordingActive) startBtn.click(); });
+  const ovMock = $("ovMock"); if (ovMock) ovMock.addEventListener("click", () => { go("mock"); if (!mockRunning) startMockBtn.click(); });
+  const ovLib = $("ovLib"); if (ovLib) ovLib.addEventListener("click", () => go("library"));
+  const ovExport = $("ovExport"); if (ovExport) ovExport.addEventListener("click", () => go("export"));
+  const rc = $("ovRecent");
+  if (rc && rec.length) {
+    rc.innerHTML = rec.map((r) => {
+      const m = (r.method || "GET").toUpperCase();
+      return `<div class="lib-ep-row" data-seq="${r.seq}">
+        <span class="method-badge m-${(m || "get").toLowerCase()}">${m}</span>
+        <span class="ep-path">${esc(r.path || r.url || "")}</span>
+        <span class="ep-cnt">${r.response && r.response.status ? r.response.status : ""}</span>
+      </div>`;
+    }).join("");
+    rc.querySelectorAll(".lib-ep-row").forEach((row) => row.addEventListener("click", () => {
+      const seq = Number(row.getAttribute("data-seq"));
+      go("recording"); openDetail(seq);
+    }));
+  }
+}
+
+// ---------------- 请求库（清单 + 端点详情 + 可编辑 API 文档）----------------
+const libState = { view: "list", domain: "", method: "", path: "", filter: "", collapsed: {}, filters: { methods: new Set(), err: false, apiOnly: true } };
+window.libState = libState;
+function libMatch(d, m, p, arr) {
+  if (libState.filters.methods.size && !libState.filters.methods.has(m)) return false;
+  if (libState.filters.err) {
+    const hasErr = arr.some((r) => r.is_failed || (r.response && r.response.status && r.response.status >= 400));
+    if (!hasErr) return false;
+  }
+  return true;
+}
+function groupLib() {
+  const byDomain = {};
+  allRequests.forEach((r) => {
+    // 请求库只收 API（XHR/FETCH）；非 API（DOCUMENT/IMAGE/STYLESHEET…）默认不进库
+    if (libState.filters.apiOnly && !["XHR", "FETCH"].includes((r.resource_type || "").toUpperCase())) return;
+    const d = r.registered_domain || r.host || "(未知)";
+    if (!byDomain[d]) byDomain[d] = {};
+    const key = (r.method || "GET").toUpperCase() + " " + (r.path || r.url || "");
+    if (!byDomain[d][key]) byDomain[d][key] = [];
+    byDomain[d][key].push(r);
+  });
+  return byDomain;
+}
+// 左：文档目录（常驻）
+function renderLibOutline() {
+  const $ot = $("libOutline");
+  const $oc = $("libOutlineCount");
+  if (!$ot) return;
+  const grouped = groupLib();
+  const f = (libState.filter || "").trim().toLowerCase();
+  const domains = Object.keys(grouped).sort().filter((d) => {
+    if (!f) return true;
+    if (d.toLowerCase().includes(f)) return true;
+    return Object.keys(grouped[d]).some((k) => k.toLowerCase().includes(f));
+  });
+  if ($oc) $oc.textContent = "(" + domains.length + ")";
+  $ot.innerHTML = "";
+  if (!domains.length) {
+    $ot.innerHTML = '<div class="empty" style="padding:14px">无匹配接口</div>';
+    return;
+  }
+  domains.forEach((d) => {
+    const eps = Object.keys(grouped[d]).sort();
+    const filtered = eps.filter((k) => {
+      const sp = k.split(" "); const m = sp[0]; const p = sp.slice(1).join(" ");
+      if (f && !k.toLowerCase().includes(f)) return false;
+      return libMatch(d, m, p, grouped[d][k]);
+    });
+    if (!filtered.length) return;
+    const grp = document.createElement("div");
+    grp.className = "ol-group";
+    const head = document.createElement("div");
+    head.className = "ol-ghead" + (libState.collapsed[d] ? " collapsed" : "");
+    head.innerHTML = `<span class="tw">▼</span><span class="ic">🌐</span>${esc(d)}<span class="gb">${eps.length}</span>`;
+    head.addEventListener("click", () => {
+      libState.collapsed[d] = !libState.collapsed[d];
+      renderLibOutline();
+    });
+    grp.appendChild(head);
+    if (!libState.collapsed[d]) {
+      filtered.forEach((k) => {
+        const sp = k.split(" ");
+        const m = sp[0]; const p = sp.slice(1).join(" ");
+        const isActive = libState.view === "detail" && libState.domain === d && libState.method === m && libState.path === p;
+        const it = document.createElement("div");
+        it.className = "ol-ep" + (isActive ? " active" : "");
+        it.title = k;
+        it.innerHTML = `<span class="method-badge m-${m.toLowerCase()}">${m}</span> <span class="ol-ep-path">${esc(p)}</span>`;
+        it.addEventListener("click", () => {
+          libState.view = "detail";
+          libState.domain = d; libState.method = m; libState.path = p;
+          renderLibrary();
+        });
+        grp.appendChild(it);
+      });
+    }
+    $ot.appendChild(grp);
+  });
+}
+// 右：清单 / 端点详情（切换）
+// 接口文档缓存：录制详情与请求库共享同一份，列表标签据此渲染
+let endpointDocCache = {};
+function refreshEndpointDocs() {
+  return postJSON("/api/endpoint/docs", {}).then((r) => {
+    if (r.ok && r.data && r.data.ok) {
+      const c = {};
+      (r.data.docs || []).forEach((d) => { c[(d.method || "").toUpperCase() + " " + (d.path || "")] = d; });
+      endpointDocCache = c;
+    }
+  }).catch(() => {});
+}
+function renderLibrary() {
+  renderLibOutline();
+  const pad = $("libraryPad");
+  if (!pad) return;
+  if (libState.view === "detail") renderLibDetail(pad);
+  else renderLibList(pad);
+  refreshEndpointDocs().then(() => {
+    if (libState.view === "list" && pad) renderLibList(pad);
+  });
+}
+function renderLibList(pad) {
+  const grouped = groupLib();
+  const f = (libState.filter || "").trim().toLowerCase();
+  const domains = Object.keys(grouped).sort().filter((d) => {
+    if (!f) return true;
+    if (d.toLowerCase().includes(f)) return true;
+    return Object.keys(grouped[d]).some((k) => k.toLowerCase().includes(f));
+  });
+  if (!domains.length) {
+    pad.innerHTML = `<div class="card"><div class="empty">${f ? "无匹配接口" : "请求库为空。录制或导入接口后，这里会按归属域组织成 API 清单。"}</div></div>`;
+    return;
+  }
+  let html = `<div class="lib-list">`;
+  domains.forEach((d) => {
+    const eps = Object.keys(grouped[d]).sort().filter((k) => {
+      const sp = k.split(" "); const m = sp[0]; const p = sp.slice(1).join(" ");
+      if (f && !k.toLowerCase().includes(f)) return false;
+      return libMatch(d, m, p, grouped[d][k]);
+    });
+    if (!eps.length) return;
+    const cnt = eps.length;
+    html += `<div class="lib-sec">
+      <div class="lib-sec-head"><span class="ic">🌐</span> ${esc(d)} <span class="cnt">${cnt} 端点</span></div>`;
+    eps.forEach((k) => {
+      const arr = grouped[d][k];
+      const sp = k.split(" ");
+      const m = sp[0]; const p = sp.slice(1).join(" ");
+      const first = arr[0];
+      const ed = endpointDocCache[m + " " + p];
+      // 接口文档缓存没标签时，用该端点下所有录制记录的 tags 做兜底（兼容旧数据）
+      const reqTags = !ed || !ed.tags || !ed.tags.length
+        ? Array.from(new Set(arr.flatMap((r) => r.tags || []))).sort()
+        : [];
+      const sum = (ed && ed.tags && ed.tags.length) ? ed.tags.join(" ") : reqTags.join(" ");
+      html += `<div class="lib-ep-row" data-d="${esc(d)}" data-m="${esc(m)}" data-p="${esc(p)}">
+        <span class="method-badge m-${m.toLowerCase()}">${m}</span>
+        <span class="ep-path">${esc(p)}</span>
+        ${sum ? `<span class="ep-sum">${esc(sum)}</span>` : ""}
+        <span class="ep-cnt">${arr.length} 次</span>
+        <span class="chev">›</span>
+      </div>`;
+    });
+    html += `</div>`;
+  });
+  html += `</div>`;
+  pad.innerHTML = html;
+  pad.querySelectorAll(".lib-ep-row").forEach((row) => row.addEventListener("click", () => {
+    libState.view = "detail";
+    libState.domain = row.getAttribute("data-d");
+    libState.method = row.getAttribute("data-m");
+    libState.path = row.getAttribute("data-p");
+    renderLibrary();
+  }));
+}
+const _libSearch = $("libOutlineSearch");
+if (_libSearch) _libSearch.addEventListener("input", (e) => {
+  libState.filter = e.target.value;
+  libState.collapsed = {};
+  if (libState.view === "detail") { libState.view = "list"; libState.domain = ""; libState.method = ""; libState.path = ""; }
+  renderLibrary();
+});
+// 筛选条件：method chips + 仅错误（与文本搜索叠加）
+const _libFilters = $("libFilters");
+if (_libFilters) {
+  _libFilters.querySelectorAll(".fchip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const m = chip.getAttribute("data-m");
+      const t = chip.getAttribute("data-t");
+      if (m) {
+        if (libState.filters.methods.has(m)) { libState.filters.methods.delete(m); chip.classList.remove("active"); }
+        else { libState.filters.methods.add(m); chip.classList.add("active"); }
+      } else if (t === "err") {
+        libState.filters.err = !libState.filters.err;
+        chip.classList.toggle("active", libState.filters.err);
+      } else if (t === "api") {
+        libState.filters.apiOnly = !libState.filters.apiOnly;
+        chip.classList.toggle("active", libState.filters.apiOnly);
+      }
+      libState.collapsed = {};
+      if (libState.view === "detail") { libState.view = "list"; libState.domain = ""; libState.method = ""; libState.path = ""; }
+      renderLibrary();
+    });
+  });
+}
+// 可拖拽分隔条：调节目录宽度（持久化到 localStorage）
+(function () {
+  const sp = $("libSplitter");
+  if (!sp) return;
+  let startX = 0, startW = 236;
+  const onMove = (e) => {
+    const w = Math.max(160, Math.min(560, startW + (e.clientX - startX)));
+    document.documentElement.style.setProperty("--lib-outline-w", w + "px");
+  };
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    document.body.style.cursor = ""; document.body.style.userSelect = "";
+    sp.classList.remove("dragging");
+    try { localStorage.setItem("libOutlineW", document.documentElement.style.getPropertyValue("--lib-outline-w")); } catch (e) {}
+  };
+  sp.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    startX = e.clientX;
+    const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--lib-outline-w")) || 236;
+    startW = cur;
+    sp.classList.add("dragging");
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none";
+  });
+  try { const w = localStorage.getItem("libOutlineW"); if (w) document.documentElement.style.setProperty("--lib-outline-w", w); } catch (e) {}
+})();
+function renderLibDetail(pad) {
+  const grouped = groupLib();
+  const arr = (grouped[libState.domain] || {})[libState.method + " " + libState.path] || [];
+  const m = libState.method, p = libState.path;
+  // 顶部区域：面包屑 + API 标题卡片
+  const displayName = (window.__epDoc && window.__epDoc.name) || "";
+  const titleText = displayName || p;
+  let html = `<div class="breadcrumb"><a data-go="library">请求库</a> <span class="bc-sep">›</span> ${esc(libState.domain)} <span class="bc-sep">›</span> <span class="method-badge m-${m.toLowerCase()}">${m}</span> ${esc(p)}</div>`;
+  html += `<div class="doc-head">
+    <div class="doc-title-row">
+      <span class="method-badge m-${m.toLowerCase()} doc-method">${m}</span>
+      <h2 class="doc-title" id="epTitle">${esc(titleText)}</h2>
+      <span class="doc-title-path" id="epTitlePath" style="${displayName ? "" : "display:none"}">${esc(p)}</span>
+    </div>
+    <div class="doc-meta"><span class="dot"></span> ${esc(libState.domain)} · ${arr.length} 次捕获</div>
+  </div>`;
+  // 案例表
+  html += `<div class="card" style="margin-top:4px"><div class="card-title">案例情况</div>
+    <table class="case-table"><thead><tr><th>#</th><th>时间</th><th>状态</th><th>大小</th><th>耗时</th><th>请求体</th></tr></thead><tbody>`;
+  arr.slice().reverse().forEach((r, i) => {
+    const resp = r.response || {};
+    const t = r.time || r.timestamp || "";
+    const st = resp.status || "";
+    const ms = (resp && resp.time_ms != null) ? resp.time_ms : "";
+    const sz = resp.size_bytes != null ? fmtSize(resp.size_bytes) : "—";
+    const hasBody = (r.request && r.request.post_data) ? "有" : "—";
+    html += `<tr class="case-row" data-seq="${r.seq}"><td>${arr.length - i}</td><td>${esc(String(t).slice(0, 19))}</td><td>${st}</td><td>${sz}</td><td>${ms}</td><td>${hasBody}</td></tr>
+      <tr class="case-detail" id="cd-${r.seq}" style="display:none"><td colspan="6"></td></tr>`;
+  });
+  html += `</tbody></table></div>`;
+  // 可编辑 API 信息：用户要求只保留 名称 / 标签 / 备注
+  html += `<div class="card"><div class="card-title">API 信息（可编辑）</div>
+    <div class="set-row"><span class="lbl">名称</span><input type="text" class="input ep-input" id="epName" placeholder="输入 API 名称"></div>
+    <div class="set-row"><span class="lbl">标签</span><span id="epTags"></span> <span class="tag-add" id="epTagAdd">+ 标签</span></div>
+    <div class="set-row"><span class="lbl">备注</span><input type="text" class="input ep-input" id="epNote" placeholder="输入接口备注"></div>
+    <div class="set-row"><span class="lbl">保存</span><button class="btn btn-sm btn-primary" id="epSave">保存文档</button></div>
+  </div>`;
+  html += `<div class="card"><div class="card-title">请求参数</div><div id="epReqFields"></div><button class="btn btn-sm" id="epReqAdd">+ 添加字段</button></div>`;
+  html += `<div class="card"><div class="card-title">响应字段</div><div id="epRespFields"></div><button class="btn btn-sm" id="epRespAdd">+ 添加字段</button></div>`;
+  pad.innerHTML = html;
+  // 案例展开：用录制界面同款 tab 视图（概览 / 请求头 / 请求体 / 响应头 / 响应体 / Query）
+  pad.querySelectorAll(".case-row").forEach((row) => row.addEventListener("click", () => {
+    const seq = row.getAttribute("data-seq");
+    const det = $("cd-" + seq);
+    if (!det) return;
+    const td = det.querySelector("td");
+    if (det.style.display === "none") {
+      const r = allRequests.find((x) => String(x.seq) === seq);
+      if (!r) { td.innerHTML = ""; det.style.display = ""; return; }
+      const tabs = [
+        { key: "overview", label: "概览" },
+        { key: "req-headers", label: "请求头" },
+        { key: "req-body", label: "请求体" },
+        { key: "res-headers", label: "响应头" },
+        { key: "res-body", label: "响应体" },
+        { key: "query", label: "Query" },
+      ];
+      let active = "overview";
+      const render = () => {
+        const tabBar = `<div class="detail-tabs" id="cdtabs-${seq}">${tabs.map((t) => tabBtn(t.key, t.label, active)).join("")}</div>`;
+        const body = `<div class="detail-body" id="cdbody-${seq}">${renderTab(r, active)}</div>`;
+        td.innerHTML = `<div class="case-detail-inner">${tabBar}${body}</div>`;
+        td.querySelectorAll(".tab").forEach((el) => el.addEventListener("click", () => {
+          active = el.getAttribute("data-tab");
+          render();
+        }));
+      };
+      render();
+      det.style.display = "";
+    } else det.style.display = "none";
+  }));
+  // 加载文档
+  loadEndpointDoc(m, p, arr);
+  // 返回
+  const bc = pad.querySelector('.breadcrumb a[data-go="library"]');
+  if (bc) bc.addEventListener("click", (e) => { e.preventDefault(); libState.view = "list"; renderLibrary(); });
+  // 标签新增
+  const tagAdd = $("epTagAdd");
+  if (tagAdd) tagAdd.addEventListener("click", () => {
+    const v = prompt("输入标签："); if (!v) return;
+    const chip = document.createElement("span");
+    chip.className = "tag-chip"; chip.innerHTML = `${esc(v.trim())} <span class="x">×</span>`;
+    chip.querySelector(".x").addEventListener("click", () => chip.remove());
+    $("epTags").appendChild(chip);
+  });
+  // 字段增删（数据源挂 window.__epDoc，异步加载后会重渲染）
+  window.__epDoc = { name: "", note: "", tags: [], req: [], resp: [] };
+  const wireFields = (containerId, key) => {
+    const c = $(containerId);
+    if (!c) return;
+    const renderF = () => {
+      const store = (window.__epDoc && window.__epDoc[key]) || [];
+      c.innerHTML = `<table class="field-table"><thead><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th><th></th></tr></thead><tbody id="${containerId}B"></tbody></table>`;
+      const tb = $(containerId + "B");
+      store.forEach((f, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td><input class="field-input" data-k="name" value="${esc(f.name || "")}" placeholder="字段名"></td>
+          <td><input class="field-input" data-k="type" value="${esc(f.type || "")}" placeholder="string"></td>
+          <td><input type="checkbox" data-k="required" ${f.required ? "checked" : ""}></td>
+          <td><input class="field-input" data-k="desc" value="${esc(f.desc || "")}" placeholder="说明"></td>
+          <td><button class="mini-btn" data-del="1">×</button></td>`;
+        tr.querySelectorAll("input").forEach((inp) => inp.addEventListener("input", () => {
+          const k = inp.getAttribute("data-k");
+          if (k === "required") f.required = inp.checked; else f[k] = inp.value;
+        }));
+        tr.querySelector("[data-del]").addEventListener("click", () => { store.splice(idx, 1); renderF(); });
+        tb.appendChild(tr);
+      });
+    };
+    renderF();
+  };
+  window.__libRerender = () => {
+    wireFields("epReqFields", "req");
+    wireFields("epRespFields", "resp");
+  };
+  wireFields("epReqFields", "req");
+  wireFields("epRespFields", "resp");
+  const ra = $("epReqAdd"); if (ra) ra.addEventListener("click", () => { window.__epDoc.req.push({ name: "", type: "", required: false, desc: "" }); window.__libRerender(); });
+  const sa = $("epRespAdd"); if (sa) sa.addEventListener("click", () => { window.__epDoc.resp.push({ name: "", type: "", required: false, desc: "" }); window.__libRerender(); });
+  // 保存
+  const save = $("epSave");
+  if (save) save.addEventListener("click", () => {
+    const tags = Array.from($("epTags").querySelectorAll(".tag-chip")).map((c) => c.textContent.replace("×", "").trim()).filter(Boolean);
+    const doc = {
+      method: m, path: p,
+      name: ($("epName") || {}).value || "",
+      note: ($("epNote") || {}).value || "",
+      tags, req: window.__epDoc.req, resp: window.__epDoc.resp,
+    };
+    postJSON("/api/endpoint/doc", doc).then((r) => {
+      if (r.ok && r.data && r.data.ok) alert("已保存 API 文档");
+      else alert("保存失败：" + ((r.data && r.data.error) || "未知错误"));
+    }).catch((e) => alert("保存失败：" + e));
+  });
+}
+// 从实际捕获样本推断接口文档字段（请求参数 / 响应字段）
+function _tryParseJson(s) { try { return JSON.parse(s); } catch (e) { return undefined; } }
+function _typeOf(v) {
+  if (v === null || v === undefined) return "string";
+  const t = typeof v;
+  if (t === "boolean") return "boolean";
+  if (t === "number") return Number.isInteger(v) ? "integer" : "number";
+  if (Array.isArray(v)) return "array";
+  if (t === "object") return "object";
+  return "string";
+}
+// 同一端点的多次捕获可能格式不一致（类型不同 / 字段时有时无 / JSON 与 form 混用）。
+// 统计结构统一为 { samples: Set<样本下标>, values: [] }：出现率按「样本数」去重计算，
+// 避免数组内多元素把出现次数放大；类型则收集全部取值类型，冲突时以 "|" 联合展示。
+function _hit(out, key, si, value) {
+  if (!key) return;
+  if (!out[key]) out[key] = { samples: new Set(), values: [] };
+  out[key].samples.add(si);
+  if (value !== undefined) out[key].values.push(value);
+}
+function _collectQueryFields(samples, out) {
+  samples.forEach((r, si) => {
+    const q = (r.query || "").trim();
+    if (!q) return;
+    q.split("&").forEach((part) => {
+      const i = part.indexOf("=");
+      const k = i >= 0 ? decodeURIComponent(part.slice(0, i)) : decodeURIComponent(part);
+      if (!k) return;
+      _hit(out, k, si, i >= 0 ? decodeURIComponent(part.slice(i + 1)) : "");
+    });
+  });
+}
+// 递归 flatten JSON：对象用 "." 连接，数组用 "[*]" 表示元素，把所有层级字段都展开
+function _walkJson(value, prefix, out, depth, si) {
+  if (depth > 6) return;
+  if (value === null || value === undefined) return;
+  const key = prefix || "";
+  if (Array.isArray(value)) {
+    _hit(out, key, si, value);
+    value.forEach((item) => _walkJson(item, key ? key + "[*]" : "[*]", out, depth + 1, si));
+  } else if (typeof value === "object") {
+    _hit(out, key, si, value);
+    Object.keys(value).forEach((k) => {
+      const childKey = key ? key + "." + k : k;
+      _walkJson(value[k], childKey, out, depth + 1, si);
+    });
+  } else {
+    _hit(out, key, si, value);
+  }
+}
+function _collectBodyFields(samples, out) {
+  samples.forEach((r, si) => {
+    const body = r.request && r.request.post_data;
+    if (body == null || body === "") return;
+    // JSON body：递归展开所有层级
+    const json = _tryParseJson(body);
+    if (json !== undefined) {
+      _walkJson(json, "", out, 0, si);
+      return;
+    }
+    // form body（仍只取一层 key）
+    const ct = (r.request && r.request.headers && r.request.headers["Content-Type"]) || "";
+    if (ct.indexOf("application/x-www-form-urlencoded") >= 0 || body.indexOf("=") >= 0) {
+      body.split("&").forEach((part) => {
+        const i = part.indexOf("=");
+        const k = i >= 0 ? decodeURIComponent(part.slice(0, i)) : decodeURIComponent(part);
+        if (!k) return;
+        _hit(out, k, si, undefined);
+      });
+    }
+  });
+}
+function _collectRespFields(samples, out) {
+  samples.forEach((r, si) => {
+    const body = r.response && r.response.body;
+    if (body == null || body === "") return;
+    const json = _tryParseJson(body);
+    if (json !== undefined) {
+      _walkJson(json, "", out, 0, si);
+    }
+  });
+}
+function _fieldsFromStats(stats, total) {
+  return Object.keys(stats).sort().map((k) => {
+    const s = stats[k];
+    const hit = s.samples.size;
+    // 类型冲突（同一字段在不同样本里类型不同）→ 用 "|" 列出全部出现过的类型
+    const types = new Set();
+    (s.values || []).forEach((x) => { if (x !== null && x !== undefined) types.add(_typeOf(x)); });
+    const type = types.size ? Array.from(types).sort().join("|") : "string";
+    // 字段时有时无 → 在说明里标注出现率，提醒这不是稳定字段
+    const desc = (total > 0 && hit < total) ? `出现 ${hit}/${total} 次` : "";
+    return { name: k, type, required: total > 0 && hit >= total, desc };
+  });
+}
+function inferEndpointDoc(method, path, samples) {
+  const matched = (samples || []).filter((r) =>
+    (r.method || "GET").toUpperCase() === (method || "GET").toUpperCase() &&
+    (r.path || "") === (path || ""));
+  const total = matched.length;
+  const reqStats = {};
+  _collectQueryFields(matched, reqStats);
+  _collectBodyFields(matched, reqStats);
+  const respStats = {};
+  _collectRespFields(matched, respStats);
+  return {
+    name: "", note: "", tags: [],
+    req: _fieldsFromStats(reqStats, total),
+    resp: _fieldsFromStats(respStats, total),
+  };
+}
+function loadEndpointDoc(method, path, samples) {
+  const inferred = inferEndpointDoc(method, path, samples);
+  // 兜底：该端点下录制记录里的 tags/note（兼容旧数据，统一模型前标签存在 requests 表）
+  const recTags = Array.from(new Set((samples || []).flatMap((r) => r.tags || []))).sort();
+  const recNote = (samples || []).map((r) => r.note).filter(Boolean)[0] || "";
+  const applyDoc = (d) => {
+    const tags = (d.tags && d.tags.length) ? d.tags : recTags;
+    const note = d.note || recNote;
+    window.__epDoc = {
+      name: d.name || "",
+      note,
+      tags,
+      req: (d.req && d.req.length) ? d.req : inferred.req,
+      resp: (d.resp && d.resp.length) ? d.resp : inferred.resp,
+    };
+    const nm = $("epName"); if (nm) nm.value = window.__epDoc.name;
+    const n = $("epNote"); if (n) n.value = window.__epDoc.note;
+    const title = $("epTitle");
+    const titlePath = $("epTitlePath");
+    if (title) title.textContent = window.__epDoc.name || path;
+    if (titlePath) titlePath.style.display = window.__epDoc.name ? "" : "none";
+    const tc = $("epTags");
+    if (tc) {
+      tc.innerHTML = "";
+      (window.__epDoc.tags || []).forEach((t) => {
+        const chip = document.createElement("span");
+        chip.className = "tag-chip"; chip.innerHTML = `${esc(t)} <span class="x">×</span>`;
+        chip.querySelector(".x").addEventListener("click", () => chip.remove());
+        tc.appendChild(chip);
+      });
+    }
+    if (window.__libRerender) window.__libRerender();
+  };
+  postJSON("/api/endpoint/doc", { method, path }).then((r) => {
+    if (r.ok && r.data && r.data.ok) applyDoc(r.data.doc || {});
+    else applyDoc(inferred);
+  }).catch(() => applyDoc(inferred));
+}
+
+// ---------------- 导出（独立大功能）----------------
+const exportState = { fmt: "json", scope: "all", scopeValue: "", sel: new Set(), previewOpen: false };
+const FMTS = [
+  { id: "har", ic: "🗂️", t: "HAR", d: "完整抓包归档，含请求头/体/响应，Charles、Fiddler 可直接打开" },
+  { id: "json", ic: "🧾", t: "JSON", d: "结构化接口清单，含字段定义与案例摘要，便于二次处理" },
+  { id: "mock", ic: "🧪", t: "Mock 脚本", d: "基于录制库生成进程内 Mock 服务源码（Flask），开箱即用" },
+  { id: "openapi", ic: "📘", t: "OpenAPI 3", d: "生成 OpenAPI 3（JSON），可直接导入 Swagger / Apifox" },
+];
+function exportStats(seqs) {
+  const list = seqs == null ? allRequests : allRequests.filter((r) => seqs.includes(r.seq));
+  return { e: list.length, c: list.reduce((s, r) => s + 1, 0) };
+}
+function exportScopeSeqs() {
+  const s = exportState.scope;
+  if (s === "all") return null;
+  if (s === "domain") return allRequests.filter((r) => (r.registered_domain || r.host) === exportState.scopeValue).map((r) => r.seq);
+  if (s === "tag") return allRequests.filter((r) => (r.tags || []).includes(exportState.scopeValue)).map((r) => r.seq);
+  if (s === "manual") return Array.from(exportState.sel);
+  return null;
+}
+function renderExport() {
+  const pad = $("exportPad");
+  if (!pad) return;
+  const domains = Array.from(new Set(allRequests.map((r) => r.registered_domain || r.host || "(未知)"))).sort();
+  const tags = Array.from(new Set(allRequests.flatMap((r) => r.tags || []))).sort();
+  const seqs = exportScopeSeqs();
+  const st = exportStats(seqs);
+  let cond = "";
+  if (exportState.scope === "domain") cond = `<select class="exp-select" id="expDomain">${domains.map((d) => `<option ${d === exportState.scopeValue ? "selected" : ""}>${esc(d)}</option>`).join("")}</select>`;
+  else if (exportState.scope === "tag") cond = `<select class="exp-select" id="expTag">${tags.map((t) => `<option ${t === exportState.scopeValue ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+  else if (exportState.scope === "manual") {
+    cond = `<div class="chk-list">${allRequests.map((r) => {
+      const k = (r.method || "GET").toUpperCase() + " " + (r.path || r.url || "");
+      return `<label class="chk-item"><input type="checkbox" data-seq="${r.seq}" ${exportState.sel.has(r.seq) ? "checked" : ""}><span class="cp">${esc(k)}</span></label>`;
+    }).join("")}</div>`;
+  }
+  pad.innerHTML = `
+    <div class="exp-wrap">
+      <div class="exp-head">
+        <div><div class="top-title">导出</div></div>
+        <div class="exp-stats">
+          <div class="exp-stat"><span class="n">${st.e}</span><span class="l">接口/请求</span></div>
+          <div class="exp-stat"><span class="n">${st.c}</span><span class="l">捕获案例</span></div>
+          <div class="exp-stat"><span class="n">${FMTS.find((f) => f.id === exportState.fmt).t}</span><span class="l">当前格式</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">导出格式</div>
+        <div class="fmt-grid">${FMTS.map((f) => `<div class="fmt-card ${f.id === exportState.fmt ? "sel" : ""}" data-fmt="${f.id}"><div class="fmt-ic">${f.ic}</div><div class="fmt-t">${f.t}</div><div class="fmt-d">${esc(f.d)}</div></div>`).join("")}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">导出范围</div>
+        <div class="seg" id="expScope">
+          <button class="seg-btn ${exportState.scope === "all" ? "on" : ""}" data-s="all">全部录制</button>
+          <button class="seg-btn ${exportState.scope === "domain" ? "on" : ""}" data-s="domain">按归属</button>
+          <button class="seg-btn ${exportState.scope === "tag" ? "on" : ""}" data-s="tag">按标签</button>
+          <button class="seg-btn ${exportState.scope === "manual" ? "on" : ""}" data-s="manual">手动勾选</button>
+        </div>
+        <div class="exp-cond" id="expCond" style="margin-top:12px">${cond}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">脱敏（导出时生效）</div>
+        <label class="check"><input type="checkbox" id="desensitize" ${desensitizeEl && desensitizeEl.checked ? "checked" : ""}/> 脱敏导出</label>
+        <div class="mask-map" style="margin-top:8px">
+          <div class="mask-row">中文 → <input id="maskCjk" class="input input-sm" maxlength="8" value="${maskCjkEl ? esc(maskCjkEl.value) : "测"}" /></div>
+          <div class="mask-row">数字 → <input id="maskDigit" class="input input-sm" maxlength="8" value="${maskDigitEl ? esc(maskDigitEl.value) : "1"}" /></div>
+          <div class="mask-row">英文 → <input id="maskAlpha" class="input input-sm" maxlength="8" value="${maskAlphaEl ? esc(maskAlphaEl.value) : "a"}" /></div>
+        </div>
+        <div class="set-hint">留空 = 不脱敏该类；可填多个字符。默认 测 / 1 / a。</div>
+      </div>
+      <div class="exp-bar">
+        <span class="est">预计导出 <b>${st.e}</b> 接口 / <b>${st.c}</b> 案例 · ${FMTS.find((f) => f.id === exportState.fmt).t}${(desensitizeEl && desensitizeEl.checked) ? " · 已脱敏" : ""}</span>
+        <div class="spacer"></div>
+        <button class="btn" id="expPreview">预览</button>
+        <button class="btn btn-primary" id="expDo">导出到下载文件夹</button>
+      </div>
+    </div>
+    <div class="modal-mask hide" id="expPreviewModal">
+      <div class="modal modal-lg">
+        <div class="modal-head"><span class="modal-title">导出预览 · ${FMTS.find((f) => f.id === exportState.fmt).t}</span><button class="modal-close" id="expPreviewClose">×</button></div>
+        <div class="modal-body"><pre id="expPreviewBody" class="code" style="max-height:60vh;overflow:auto"></pre></div>
+      </div>
+    </div>`;
+  // 格式选择
+  pad.querySelectorAll(".fmt-card").forEach((c) => c.addEventListener("click", () => { exportState.fmt = c.getAttribute("data-fmt"); renderExport(); }));
+  // 范围切换
+  pad.querySelectorAll("#expScope .seg-btn").forEach((b) => b.addEventListener("click", () => { exportState.scope = b.getAttribute("data-s"); if (exportState.scope === "domain" && !exportState.scopeValue) exportState.scopeValue = domains[0] || ""; if (exportState.scope === "tag" && !exportState.scopeValue) exportState.scopeValue = tags[0] || ""; if (exportState.scope === "manual") allRequests.forEach((r) => exportState.sel.add(r.seq)); renderExport(); }));
+  const expDomain = $("expDomain"); if (expDomain) expDomain.addEventListener("change", () => { exportState.scopeValue = expDomain.value; renderExport(); });
+  const expTag = $("expTag"); if (expTag) expTag.addEventListener("change", () => { exportState.scopeValue = expTag.value; renderExport(); });
+  pad.querySelectorAll(".chk-item input").forEach((cb) => cb.addEventListener("change", () => { const s = Number(cb.getAttribute("data-seq")); if (cb.checked) exportState.sel.add(s); else exportState.sel.delete(s); const ns = exportStats(exportScopeSeqs()); const est = pad.querySelector(".est"); if (est) est.innerHTML = `预计导出 <b>${ns.e}</b> 接口 / <b>${ns.c}</b> 案例 · ${FMTS.find((f) => f.id === exportState.fmt).t}`; }));
+  // 脱敏
+  const de = $("desensitize"); if (de) de.addEventListener("change", () => { if (desensitizeEl) desensitizeEl.checked = de.checked; renderExport(); });
+  const mc = $("maskCjk"); if (mc) mc.addEventListener("input", () => { if (maskCjkEl) maskCjkEl.value = mc.value; persistMaskCfg(); });
+  const md = $("maskDigit"); if (md) md.addEventListener("input", () => { if (maskDigitEl) maskDigitEl.value = md.value; persistMaskCfg(); });
+  const ma = $("maskAlpha"); if (ma) ma.addEventListener("input", () => { if (maskAlphaEl) maskAlphaEl.value = ma.value; persistMaskCfg(); });
+  // 预览 / 导出
+  const pv = $("expPreview"); if (pv) pv.addEventListener("click", showExportPreview);
+  const ed = $("expDo"); if (ed) ed.addEventListener("click", doExport);
+  const pvc = $("expPreviewClose"); if (pvc) pvc.addEventListener("click", () => $("expPreviewModal").classList.add("hide"));
+}
+function showExportPreview() {
+  const modal = $("expPreviewModal"); if (!modal) return;
+  const body = $("expPreviewBody"); if (!body) return;
+  const seqs = exportScopeSeqs();
+  const list = seqs == null ? allRequests : allRequests.filter((r) => seqs.includes(r.seq));
+  const fmt = exportState.fmt;
+  let txt = "";
+  if (fmt === "openapi") {
+    const paths = {};
+    list.forEach((r) => { const p = r.path || r.url || ""; const m = (r.method || "GET").toUpperCase(); (paths[p] = paths[p] || new Set()).add(m); });
+    txt = `openapi: 3.0.3\ninfo:\n  title: API Recorder 导出\npaths: ${Object.keys(paths).length}\n` +
+      Object.keys(paths).map((p) => `  ${p}: ${Array.from(paths[p]).join(", ")}`).join("\n");
+  } else if (fmt === "mock") {
+    const eps = {};
+    list.forEach((r) => { const k = (r.method || "GET").toUpperCase() + " " + (r.path || r.url || ""); eps[k] = (eps[k] || 0) + 1; });
+    txt = `Mock 接口数：${Object.keys(eps).length}\n` + Object.keys(eps).map((k) => `  ${k}  (${eps[k]} 次捕获)`).join("\n");
+  } else {
+    txt = `{ "requests": ${list.length}, "endpoints": ${new Set(list.map((r) => (r.method || "GET").toUpperCase() + " " + (r.path || r.url || ""))).size } }\n# 字段定义与案例摘要将随录制库导出`;
+  }
+  body.textContent = txt;
+  modal.classList.remove("hide");
+}
+function doExport() {
+  const fmt = exportState.fmt;
+  const seqs = exportScopeSeqs();
+  const body = { format: fmt, seqs: seqs || [] };
+  if (desensitizeEl && desensitizeEl.checked) {
+    body.desensitize = 1;
+    if (maskCjkEl && maskCjkEl.value.trim()) body.cjk = maskCjkEl.value.trim();
+    if (maskDigitEl && maskDigitEl.value.trim()) body.digit = maskDigitEl.value.trim();
+    if (maskAlphaEl && maskAlphaEl.value.trim()) body.alpha = maskAlphaEl.value.trim();
+  }
+  const url = fmt === "mock" ? "/api/export_mock/save" : "/api/export/save";
+  const btn = $("expDo"); if (btn) { btn.disabled = true; btn.textContent = "导出中…"; }
+  postJSON(url, body).then((r) => {
+    if (r.ok && r.data && r.data.ok) showExportToast(r.data.path);
+    else alert("导出失败：" + ((r.data && r.data.error) || "未知错误"));
+  }).catch((e) => alert("导出失败：" + e))
+    .finally(() => { if (btn) { btn.disabled = false; btn.textContent = "导出到下载文件夹"; } });
+}
+
+// ---------------- 设置 ----------------
+function renderSettings() {
+  const pad = $("settingsPad");
+  if (!pad) return;
+  pad.innerHTML = `
+    <div class="set-wrap">
+      <div class="set-card">
+        <div class="card-title">端口</div>
+        <div class="set-row"><span class="lbl">服务端口</span><input id="portInput" class="input input-sm" maxlength="6" placeholder="自动" /></div>
+        <div class="set-row"><span class="lbl">Mock 端口</span><input id="mockPortInput" class="input input-sm" maxlength="6" placeholder="自动" /></div>
+        <div class="set-hint" id="portHint">服务端口修改需重启本程序生效；Mock 端口下次启动 Mock 时生效（运行中可在 Mock 面板输入框临时指定端口，无需重启）。</div>
+        <div style="margin-top:10px"><button class="btn btn-primary" id="maskSave">保存</button></div>
+      </div>
+      <div class="set-card">
+        <div class="card-title">脱敏映射（默认值，导出时引用）</div>
+        <div class="mask-map">
+          <div class="mask-row">中文 → <input id="setMaskCjk" class="input input-sm" maxlength="8" value="${maskCjkEl ? esc(maskCjkEl.value) : "测"}" /></div>
+          <div class="mask-row">数字 → <input id="setMaskDigit" class="input input-sm" maxlength="8" value="${maskDigitEl ? esc(maskDigitEl.value) : "1"}" /></div>
+          <div class="mask-row">英文 → <input id="setMaskAlpha" class="input input-sm" maxlength="8" value="${maskAlphaEl ? esc(maskAlphaEl.value) : "a"}" /></div>
+        </div>
+        <div class="set-hint">在「导出」页的脱敏开关开启时生效；此处为默认映射，修改即时保存。</div>
+      </div>
+    </div>`;
+  const sc = $("setMaskCjk"); if (sc) sc.addEventListener("input", () => { if (maskCjkEl) maskCjkEl.value = sc.value; persistMaskCfg(); });
+  const sd = $("setMaskDigit"); if (sd) sd.addEventListener("input", () => { if (maskDigitEl) maskDigitEl.value = sd.value; persistMaskCfg(); });
+  const sa = $("setMaskAlpha"); if (sa) sa.addEventListener("input", () => { if (maskAlphaEl) maskAlphaEl.value = sa.value; persistMaskCfg(); });
+  const ms = $("maskSave"); if (ms) ms.addEventListener("click", savePortCfg);
+  // 回填已保存端口
+  fetch("/api/config").then((r) => r.json()).then((d) => {
+    const pi = $("portInput"); if (pi && d && d.saved_port) pi.value = d.saved_port;
+    const mi = $("mockPortInput"); if (mi && d && d.mock_port) mi.value = d.mock_port;
+    const ph = $("portHint"); if (ph && d && d.running_port) ph.textContent = "当前运行端口：" + d.running_port + "；修改后需重启本程序生效。留空 = 自动选择。";
+  }).catch(() => {});
+}
+
+// ---------------- 命令面板（Ctrl K）----------------
+const COMMANDS = [
+  { g: "导航", i: "🏠", t: "概览", act: () => go("overview") },
+  { g: "导航", i: "📡", t: "录制", act: () => go("recording") },
+  { g: "导航", i: "🧪", t: "Mock 服务", act: () => go("mock") },
+  { g: "导航", i: "📚", t: "请求库", act: () => go("library") },
+  { g: "导航", i: "📤", t: "导出", act: () => go("export") },
+  { g: "导航", i: "⚙", t: "设置", act: () => go("settings") },
+  { g: "操作", i: "●", t: "开始录制", act: () => { go("recording"); if (!recordingActive) startBtn.click(); } },
+  { g: "操作", i: "■", t: "停止录制", act: () => { if (recordingActive) stopBtn.click(); } },
+  { g: "操作", i: "▶", t: "启动 Mock", act: () => { go("mock"); if (!mockRunning) startMockBtn.click(); } },
+  { g: "操作", i: "■", t: "停止 Mock", act: () => { if (mockRunning) stopMockBtn.click(); } },
+  { g: "操作", i: "📤", t: "导出到文件", act: () => go("export") },
+  { g: "操作", i: "🗑", t: "清空录制", act: () => clearBtn.click() },
+];
+let _cmdkItems = [];
+function openCommandPalette() { const c = $("cmdk"); if (c) { c.classList.add("open"); const i = $("cmdkInput"); if (i) { i.value = ""; i.focus(); } renderCommandPalette(""); } }
+function closeCommandPalette() { const c = $("cmdk"); if (c) c.classList.remove("open"); }
+function renderCommandPalette(q) {
+  const list = $("cmdkList"); if (!list) return;
+  q = (q || "").trim().toLowerCase();
+  _cmdkItems = COMMANDS.filter((c) => !q || c.t.toLowerCase().includes(q) || (c.g || "").toLowerCase().includes(q));
+  if (!_cmdkItems.length) { list.innerHTML = `<div class="cmdk-empty">无匹配命令</div>`; return; }
+  const groups = {};
+  _cmdkItems.forEach((c, idx) => { (groups[c.g] = groups[c.g] || []).push({ c, idx }); });
+  let html = "";
+  Object.keys(groups).forEach((g) => {
+    html += `<div class="cmdk-group">${g}</div>`;
+    groups[g].forEach(({ c, idx }) => {
+      html += `<div class="cmdk-item ${idx === 0 ? "active" : ""}" data-idx="${idx}"><span class="ci-ic">${c.i}</span><span class="ci-t">${esc(c.t)}</span></div>`;
+    });
+  });
+  list.innerHTML = html;
+  list.querySelectorAll(".cmdk-item").forEach((el) => el.addEventListener("click", () => { const idx = Number(el.getAttribute("data-idx")); runCommand(idx); }));
+}
+function runCommand(idx) {
+  const c = _cmdkItems[idx]; if (!c) return;
+  closeCommandPalette(); c.act();
+}
+const cmdkTrigger = $("cmdkTrigger");
+if (cmdkTrigger) cmdkTrigger.addEventListener("click", openCommandPalette);
+const cmdkInput = $("cmdkInput");
+if (cmdkInput) cmdkInput.addEventListener("input", () => renderCommandPalette(cmdkInput.value));
+const cmdkEl = $("cmdk");
+if (cmdkEl) cmdkEl.addEventListener("click", (e) => { if (e.target === cmdkEl) closeCommandPalette(); });
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); cmdkEl && cmdkEl.classList.contains("open") ? closeCommandPalette() : openCommandPalette(); return; }
+  if (!cmdkEl || !cmdkEl.classList.contains("open")) return;
+  if (e.key === "Escape") { closeCommandPalette(); return; }
+  if (e.key === "ArrowDown") { e.preventDefault(); moveCmdk(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); moveCmdk(-1); }
+  else if (e.key === "Enter") { e.preventDefault(); const a = cmdkEl.querySelector(".cmdk-item.active"); if (a) runCommand(Number(a.getAttribute("data-idx"))); }
+});
+function moveCmdk(dir) {
+  if (!_cmdkItems.length) return;
+  let cur = _cmdkItems.findIndex((_, i) => { const el = document.querySelector(`.cmdk-item[data-idx="${i}"]`); return el && el.classList.contains("active"); });
+  if (cur < 0) cur = 0; else cur = (cur + dir + _cmdkItems.length) % _cmdkItems.length;
+  document.querySelectorAll(".cmdk-item").forEach((el) => el.classList.remove("active"));
+  const el = document.querySelector(`.cmdk-item[data-idx="${cur}"]`);
+  if (el) { el.classList.add("active"); el.scrollIntoView({ block: "nearest" }); }
+}
+
+// ---------------- 初始化 ----------------
+renderOverview();
+renderLibrary();
+renderSettings();
+renderExport();
+// 延迟渲染屏（导出 / 设置）中的元素在加载时为 null，此处统一重新查询并补绑定
+desensitizeEl = $("desensitize");
+maskCjkEl = $("maskCjk"); maskDigitEl = $("maskDigit"); maskAlphaEl = $("maskAlpha");
+portInputEl = $("portInput"); mockPortInputEl = $("mockPortInput"); portHintEl = $("portHint");
+loadMaskCfg();
+[maskCjkEl, maskDigitEl, maskAlphaEl].forEach((el) => { if (el) el.addEventListener("input", persistMaskCfg); });
+renderExport(); // 重新渲染以反映已加载的脱敏默认值
+// 读取已保存端口（若有）回填到输入框，并显示当前运行端口
+fetch("/api/config").then((r) => r.json()).then((d) => {
+  if (d && d.saved_port && portInputEl) portInputEl.value = d.saved_port;
+  if (d && d.mock_port && mockPortInputEl) mockPortInputEl.value = d.mock_port;
+  if (d && d.mock_port && mockPortInput2El) mockPortInput2El.value = d.mock_port;
+  if (d && d.running_port && portHintEl) portHintEl.textContent = "当前运行端口：" + d.running_port + "；修改后需重启本程序生效。留空 = 自动选择。";
+}).catch(() => {});
+updateNavBadges();
 connect();

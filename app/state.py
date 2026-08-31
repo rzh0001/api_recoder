@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """共享状态：store / browser_manager / WebSocket 客户端集合与广播函数。"""
+import atexit
 import threading
+from pathlib import Path
 
 from .capture_store import CaptureStore
 from .browser_manager import BrowserManager
 from .mock_manager import MockManager
 
 store = CaptureStore()
+store.set_persist(Path(__file__).resolve().parent.parent / "data" / "records.json")
+atexit.register(store.persist)
 ws_clients = set()
 ws_lock = threading.Lock()
 
