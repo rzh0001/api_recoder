@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>API Recorder · 全新界面设计方案（高保真原型）</title>
+<style>
+  /* ============ Design Tokens · 浅色 + 青绿 ============ */
+  :root{
+    --bg:#f3f7f6; --surface:#ffffff; --surface-2:#f7faf9; --surface-3:#eef3f1;
+    --border:#e4eae8; --border-strong:#d4dcd9;
+    --text:#15201c; --text-2:#46534d; --muted:#7c8883;
+    --accent:#0d9488; --accent-strong:#0f766e; --accent-soft:#d6f3ee; --accent-soft-2:#ecfbf8;
+    --success:#15a36b; --warning:#e08a00; --danger:#e2483b; --info:#2f8be0;
+    --m-get:#15a36b; --m-post:#2f8be0; --m-put:#e08a00; --m-delete:#e2483b; --m-patch:#8b5cf6;
+    --r-sm:7px; --r:11px; --r-lg:16px; --r-pill:999px;
+    --sh-1:0 1px 2px rgba(16,32,28,.06), 0 1px 3px rgba(16,32,28,.04);
+    --sh-2:0 6px 22px rgba(16,32,28,.10);
+    --sh-pop:0 18px 50px rgba(16,32,28,.22);
+    --font:"Inter","PingFang SC","Microsoft YaHei",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:"JetBrains Mono","SF Mono","Cascadia Code",Consolas,ui-monospace,monospace;
+    --sb-w:236px; --tb-h:60px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:13.5px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;display:flex;overflow:hidden;user-select:text}
+
+  /* ============ App Shell ============ */
+  .app{display:flex;width:100vw;height:100vh}
+
+  /* ---- Sidebar ---- */
+  .sidebar{width:var(--sb-w);flex:0 0 var(--sb-w);background:var(--surface);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;padding:16px 12px;gap:4px}
+  .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 16px}
+  .brand .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#22c1a8);
+    display:grid;place-items:center;color:#fff;font-size:17px;box-shadow:var(--sh-1)}
+  .brand .name{font-weight:700;font-size:15px;letter-spacing:.2px}
+  .brand .sub{font-size:11px;color:var(--muted);font-weight:500}
+  .nav-label{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.6px;padding:14px 10px 6px;text-transform:uppercase}
+  .nav-item{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:var(--r-sm);color:var(--text-2);
+    cursor:pointer;font-weight:500;border-left:3px solid transparent;transition:.15s}
+  .nav-item svg{width:19px;height:19px;flex:0 0 19px;opacity:.8}
+  .nav-item:hover{background:var(--surface-2);color:var(--text)}
+  .nav-item.active{background:var(--accent-soft);color:var(--accent-strong);border-left-color:var(--accent);font-weight:600}
+  .nav-item.active svg{opacity:1}
+  .nav-item .badge{margin-left:auto;background:var(--accent);color:#fff;font-size:10.5px;font-weight:700;
+    padding:1px 7px;border-radius:var(--r-pill)}
+  .sb-spacer{flex:1}
+  .rec-pill{display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:var(--r);background:var(--surface-2);
+    border:1px solid var(--border);font-size:12.5px;color:var(--text-2);font-weight:600}
+  .rec-dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:0 0 9px}
+  .rec-pill.live .rec-dot{background:var(--danger);box-shadow:0 0 0 4px rgba(226,72,59,.16);animation:pulse 1.4s infinite}
+  .rec-pill.live{color:var(--danger);border-color:rgba(226,72,59,.3)}
+  @keyframes pulse{50%{box-shadow:0 0 0 7px rgba(226,72,59,0)}}
+
+  /* ---- Content ---- */
+  .content{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:var(--tb-h);flex:0 0 var(--tb-h);border-bottom:1px solid var(--border);background:var(--surface);
+    display:flex;align-items:center;gap:14px;padding:0 22px}
+  .topbar .ttl{font-size:16px;font-weight:700}
+  .topbar .ttl small{display:block;font-size:12px;font-weight:500;color:var(--muted)}
+  .topbar .grow{flex:1}
+  .cmdk-trigger{display:flex;align-items:center;gap:9px;padding:8px 13px;border:1px solid var(--border);border-radius:var(--r-pill);
+    background:var(--surface-2);color:var(--muted);cursor:pointer;font-size:12.5px;min-width:230px;transition:.15s}
+  .cmdk-trigger:hover{border-color:var(--border-strong);color:var(--text-2)}
+  .cmdk-trigger kbd{margin-left:auto;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:1px 6px;font-size:10.5px;font-family:var(--mono)}
+  .icon-btn{width:36px;height:36px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--surface);
+    display:grid;place-items:center;cursor:pointer;color:var(--text-2);transition:.15s}
+  .icon-btn:hover{background:var(--surface-2);color:var(--text)}
+  .icon-btn svg{width:18px;height:18px}
+
+  main{flex:1;overflow:auto;padding:24px 26px}
+  .screen{display:none;animation:fade .22s ease}
+  .screen.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  /* ============ Components ============ */
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-1)}
+  .card-pad{padding:18px}
+  .row{display:flex;align-items:center;gap:10px}
+  .muted{color:var(--muted)}
+  .btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 15px;border-radius:var(--r-sm);
+    border:1px solid var(--border);background:var(--surface);color:var(--text);font-weight:600;font-size:13px;cursor:pointer;transition:.15s;font-family:inherit}
+  .btn:hover{background:var(--surface-2);border-color:var(--border-strong)}
+  .btn svg{width:16px;height:16px}
+  .btn-primary{background:var(--accent-strong);border-color:var(--accent-strong);color:#fff}
+  .btn-primary:hover{background:#0c6159;border-color:#0c6159}
+  .btn-ghost{background:transparent;border-color:transparent;color:var(--text-2)}
+  .btn-ghost:hover{background:var(--surface-2)}
+  .btn-danger{background:#fff;border-color:rgba(226,72,59,.35);color:var(--danger)}
+  .btn-danger:hover{background:rgba(226,72,59,.06)}
+  .btn-sm{height:30px;padding:0 11px;font-size:12px}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .input,.select{height:34px;border:1px solid var(--border);border-radius:var(--r-sm);padding:0 11px;background:var(--surface);
+    color:var(--text);font-family:inherit;font-size:13px;outline:none;transition:.15s}
+  .input:focus,.select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field>label{font-size:12px;font-weight:600;color:var(--text-2)}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:var(--r-pill);background:var(--surface-2);
+    border:1px solid var(--border);font-size:11.5px;font-weight:600;color:var(--text-2)}
+  .mbadge{display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:20px;padding:0 7px;border-radius:5px;
+    font-size:11px;font-weight:700;font-family:var(--mono);letter-spacing:.3px}
+  .m-GET{background:#e7f6ee;color:var(--m-get)} .m-POST{background:#e8f1fc;color:var(--m-post)}
+  .m-PUT{background:#fdf1de;color:var(--m-put)} .m-DELETE{background:#fce8e6;color:var(--m-delete)}
+  .m-PATCH{background:#f1ebfc;color:var(--m-patch)}
+  .s-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .s-200{background:var(--success)} .s-4xx{background:var(--warning)} .s-5xx{background:var(--danger)}
+  .star{color:var(--border-strong);cursor:pointer;font-size:15px;line-height:1;transition:.15s}
+  .star.on{color:var(--accent)}
+  .section-title{font-size:13px;font-weight:700;color:var(--text-2);margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .section-title .line{flex:1;height:1px;background:var(--border)}
+
+  /* ============ Overview ============ */
+  .ov-hero{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:14px}
+  .ov-hero h1{margin:0;font-size:24px;font-weight:800;letter-spacing:.3px}
+  .ov-hero p{margin:4px 0 0;color:var(--muted)}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:22px}
+  .stat{padding:18px}
+  .stat .k{font-size:12px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:7px}
+  .stat .v{font-size:28px;font-weight:800;margin-top:8px;font-family:var(--mono);letter-spacing:-.5px}
+  .stat .d{font-size:11.5px;margin-top:4px;color:var(--success);font-weight:600}
+  .stat .ico{width:30px;height:30px;border-radius:9px;background:var(--accent-soft);color:var(--accent-strong);display:grid;place-items:center}
+  .ov-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:18px}
+  .quick{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .qbtn{display:flex;flex-direction:column;align-items:flex-start;gap:9px;padding:15px;border-radius:var(--r);border:1px solid var(--border);
+    background:var(--surface);cursor:pointer;transition:.15s;text-align:left}
+  .qbtn:hover{border-color:var(--accent);box-shadow:var(--sh-2);transform:translateY(-2px)}
+  .qbtn .qi{width:34px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent-strong);display:grid;place-items:center}
+  .qbtn b{font-size:13.5px} .qbtn span{font-size:11.5px;color:var(--muted)}
+  .act-item{display:flex;align-items:center;gap:11px;padding:11px 4px;border-bottom:1px solid var(--border)}
+  .act-item:last-child{border-bottom:0}
+  .act-item .t{font-family:var(--mono);font-size:12px;color:var(--text);font-weight:600}
+  .act-item .d{font-size:11.5px;color:var(--muted)}
+  .act-item .tm{margin-left:auto;font-size:11px;color:var(--muted);font-family:var(--mono)}
+
+  /* ============ Recorder ============ */
+  .rec-layout{display:grid;grid-template-columns:minmax(300px,0.9fr) 1.4fr;gap:18px;height:calc(100vh - var(--tb-h) - 48px)}
+  .panel{display:flex;flex-direction:column;min-height:0}
+  .panel-head{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-weight:700;font-size:13px}
+  .control-bar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;padding:13px 14px;border-bottom:1px solid var(--border)}
+  .filter-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--border)}
+  .filter-bar .search{flex:1;min-width:160px;display:flex;align-items:center;gap:7px;height:32px;border:1px solid var(--border);
+    border-radius:var(--r-sm);padding:0 10px;background:var(--surface-2);color:var(--muted)}
+  .filter-bar .search input{border:0;background:transparent;outline:none;flex:1;font-family:inherit;font-size:12.5px;color:var(--text)}
+  .tree{flex:1;overflow:auto;padding:8px}
+  .grp-head{display:flex;align-items:center;gap:8px;padding:8px 10px;font-weight:700;font-size:12.5px;color:var(--text);position:sticky;top:0;background:var(--surface)}
+  .grp-head .cnt{margin-left:auto;font-size:11px;color:var(--muted);font-weight:600}
+  .req-row{display:flex;align-items:center;gap:9px;padding:8px 10px 8px 22px;border-radius:var(--r-sm);cursor:pointer;transition:.12s}
+  .req-row:hover{background:var(--surface-2)}
+  .req-row.sel{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+  .req-row .p{font-family:var(--mono);font-size:12px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .req-row .st{font-size:11px;font-family:var(--mono);font-weight:700}
+  .req-row .tm{font-size:10.5px;color:var(--muted);font-family:var(--mono)}
+
+  /* detail */
+  .detail-body{flex:1;overflow:auto}
+  .detail-top{padding:14px 16px;border-bottom:1px solid var(--border)}
+  .detail-top .u{font-family:var(--mono);font-size:12.5px;word-break:break-all;color:var(--text)}
+  .tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--border);background:var(--surface-2)}
+  .tab{padding:10px 13px;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+  .tab.on{color:var(--accent-strong);border-bottom-color:var(--accent)}
+  .tabpane{padding:14px 16px;display:none} .tabpane.on{display:block}
+  .kv{font-family:var(--mono);font-size:12px;line-height:1.9}
+  .kv .k{color:var(--muted)}
+  /* JSON viewer */
+  .json{font-family:var(--mono);font-size:12.5px;line-height:1.65;background:var(--surface-2);border-radius:var(--r-sm);padding:6px 0;border:1px solid var(--border)}
+  .jline{display:flex;white-space:pre}
+  .jln{width:38px;flex:0 0 38px;text-align:right;padding-right:10px;color:var(--muted);user-select:none}
+  .jct{flex:1;padding-right:10px}
+  .fold{cursor:pointer;color:var(--accent);user-select:none;width:14px;display:inline-block}
+  .j-key{color:var(--accent-strong)} .j-str{color:var(--success)} .j-num{color:var(--warning)} .j-bool{color:#8b5cf6} .j-null{color:var(--muted)} .j-punc{color:var(--muted)}
+  .jline.ann{background:var(--accent-soft-2)}
+  .j-ann{color:var(--accent-strong);font-style:italic;font-size:11px;margin-left:8px}
+  .collapsed .children{display:none}
+
+  /* ============ Mock ============ */
+  .mock-layout{display:grid;grid-template-columns:1.5fr 1fr;gap:18px;height:calc(100vh - var(--tb-h) - 48px)}
+  .mock-list{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+  .mock-card{display:flex;align-items:center;gap:12px;padding:13px 15px;border-radius:var(--r);border:1px solid var(--border);background:var(--surface);transition:.15s}
+  .mock-card:hover{border-color:var(--accent);box-shadow:var(--sh-1)}
+  .mock-card .meta{flex:1;min-width:0}
+  .mock-card .pa{font-family:var(--mono);font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mock-card .nt{font-size:11px;color:var(--muted);margin-top:3px}
+  .mock-card .hits{font-size:11px;color:var(--muted);font-family:var(--mono);text-align:right}
+  .mock-card .hits b{color:var(--text);font-size:14px}
+  .log-list{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:7px}
+  .log-row{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:var(--r-sm);background:var(--surface-2);font-size:12px}
+  .log-row .pa{font-family:var(--mono);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .log-row .lt{font-family:var(--mono);color:var(--muted);font-size:11px}
+
+  /* ============ Library（请求库）· 文档视图 ============ */
+  .lib-doc{display:grid;grid-template-columns:236px 1fr;gap:18px;height:calc(100vh - var(--tb-h) - 48px)}
+  /* 左：文档目录 */
+  .lib-outline{display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-1)}
+  .lib-outline .panel-head{position:sticky;top:0}
+  .ol-search-wrap{padding:10px 12px 0}
+  .ol-search{width:100%}
+  .ol-tree{flex:1;overflow:auto;padding:8px 10px 16px}
+  .ol-group{margin-bottom:4px}
+  .ol-ghead{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:var(--r-sm);cursor:pointer;font-weight:700;font-size:12.5px;font-family:var(--mono);color:var(--text);transition:.15s;user-select:none}
+  .ol-ghead:hover{background:var(--surface-2)}
+  .ol-ghead .tw{font-size:9px;color:var(--muted);transition:transform .15s;width:10px;text-align:center}
+  .ol-ghead.collapsed .tw{transform:rotate(-90deg)}
+  .ol-ghead .ic{width:16px;text-align:center}
+  .ol-ghead .gb{margin-left:auto;background:var(--surface-3);color:var(--text-2);font-size:10px;font-weight:700;padding:1px 6px;border-radius:var(--r-pill);font-family:var(--mono)}
+  .ol-ep{display:block;padding:5px 9px 5px 30px;border-radius:var(--r-sm);font-size:11.5px;color:var(--text-2);cursor:pointer;font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:.15s}
+  .ol-ep:hover{background:var(--accent-soft-2);color:var(--accent-strong)}
+  .ol-ep.active{background:var(--accent-soft);color:var(--accent-strong);font-weight:600}
+  /* 右：文档正文 */
+  .lib-doc-body{overflow:auto;padding:6px 8px 48px}
+  .doc{max-width:920px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-1);padding:30px 38px 44px}
+  .doc-head{border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:6px}
+  .doc-head h1{font-size:21px;margin:0 0 6px;letter-spacing:.2px}
+  .doc-head .doc-sub{font-size:12.5px;color:var(--muted)}
+  .doc-stats{display:flex;gap:26px;margin-top:16px;flex-wrap:wrap}
+  .doc-stat{display:flex;flex-direction:column}
+  .doc-stat b{font-size:19px;font-family:var(--mono);color:var(--accent-strong);line-height:1}
+  .doc-stat span{font-size:11px;color:var(--muted);margin-top:4px}
+  .doc-domain{margin-top:32px;scroll-margin-top:12px}
+  .doc-domain > h2{font-size:15px;margin:0;display:flex;align-items:center;gap:9px;padding-bottom:9px;border-bottom:2px solid var(--border-strong)}
+  .doc-domain > h2 .dh-ic{font-size:14px}
+  .doc-domain > h2 .dh-note{font-size:11.5px;font-weight:500;color:var(--muted);margin-left:auto;font-family:var(--font)}
+  .doc-domain > h2 .dh-count{font-size:11px;font-weight:600;color:var(--text-2);background:var(--surface-3);padding:2px 9px;border-radius:var(--r-pill);font-family:var(--mono)}
+  .doc-ep{margin-top:22px;scroll-margin-top:12px}
+  .doc-ep > h3{font-size:13px;margin:0 0 9px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .doc-ep > h3 .ep-path{font-family:var(--mono);font-weight:600;color:var(--text)}
+  .doc-ep > h3 .ep-summary{font-size:11px;font-weight:500;color:var(--muted);margin-left:auto}
+  .case-table{width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
+  .case-table thead th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--muted);background:var(--surface-2);padding:8px 10px;border-bottom:1px solid var(--border)}
+  .case-table tbody td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+  .case-table tbody tr:last-child td{border-bottom:0}
+  .case-table tbody tr{cursor:pointer;transition:.12s}
+  .case-table tbody tr:hover{background:var(--surface-2)}
+  .case-table tbody tr.sel{background:var(--accent-soft-2)}
+  .case-table .c-idx{font-family:var(--mono);color:var(--muted);width:30px}
+  .case-table .c-time{font-family:var(--mono);white-space:nowrap}
+  .case-table .c-q{font-family:var(--mono);color:var(--accent-strong);max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .case-table .c-num{font-family:var(--mono);color:var(--text-2);white-space:nowrap}
+  .case-detail td{background:var(--surface-2);padding:14px 16px}
+  .case-detail .cd-grid{display:grid;grid-template-columns:78px 1fr;gap:6px 16px;font-size:12px;margin:0}
+  .case-detail .cd-grid dt{color:var(--muted);font-weight:600}
+  .case-detail .cd-grid dd{margin:0;font-family:var(--mono);color:var(--text);word-break:break-all}
+  .case-detail .cd-block{margin-top:13px}
+  .case-detail .cd-block .lbl{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:5px}
+  .case-detail pre{margin:0;background:var(--surface-3);border:1px solid var(--border);border-radius:var(--r-sm);padding:11px 13px;font-family:var(--mono);font-size:11.5px;line-height:1.55;color:var(--text-2);overflow:auto;max-height:200px}
+  .status{font-size:10.5px;font-weight:700;font-family:var(--mono);padding:2px 8px;border-radius:var(--r-pill);display:inline-block}
+  .status.s-200{background:rgba(21,163,107,.12);color:var(--success)}
+  .status.s-3xx{background:rgba(47,139,224,.12);color:var(--info)}
+  .status.s-4xx{background:rgba(226,72,59,.12);color:var(--danger)}
+  .status.s-5xx{background:rgba(226,72,59,.18);color:var(--danger)}
+
+  /* 右：清单视图（默认） */
+  .lib-list{max-width:1000px;margin:0 auto;padding:6px 8px 48px}
+  .lib-list-head{border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:6px}
+  .lib-list-head h1{font-size:21px;margin:0 0 6px;letter-spacing:.2px}
+  .lib-list-head .doc-sub{font-size:12.5px;color:var(--muted)}
+  .lib-list-head .doc-stats{display:flex;gap:26px;margin-top:16px;flex-wrap:wrap}
+  .lib-list-head .doc-stat{display:flex;flex-direction:column}
+  .lib-list-head .doc-stat b{font-size:19px;font-family:var(--mono);color:var(--accent-strong);line-height:1}
+  .lib-list-head .doc-stat span{font-size:11px;color:var(--muted);margin-top:4px}
+  .epm{margin-top:30px;scroll-margin-top:12px}
+  .epm-head{display:flex;align-items:center;gap:9px;padding-bottom:9px;border-bottom:2px solid var(--border-strong)}
+  .epm-head b{font-size:15px}
+  .epm-head .dh-ic{font-size:14px}
+  .epm-head .dh-note{font-size:11.5px;font-weight:500;color:var(--muted);margin-left:auto;font-family:var(--font)}
+  .epm-head .dh-count{font-size:11px;font-weight:600;color:var(--text-2);background:var(--surface-3);padding:2px 9px;border-radius:var(--r-pill);font-family:var(--mono)}
+  .epm-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
+  .epm-table thead th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--muted);background:var(--surface-2);padding:8px 12px;border-bottom:1px solid var(--border)}
+  .epm-table tbody td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+  .epm-table tbody tr:last-child td{border-bottom:0}
+  .epm-table tbody tr{cursor:pointer;transition:.12s}
+  .epm-table tbody tr:hover{background:var(--accent-soft-2)}
+  .epm-table .ep-path{font-family:var(--mono);font-weight:600;color:var(--text)}
+  .epm-table .ep-sum{font-size:11.5px;color:var(--muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .epm-table .ep-go{color:var(--accent);font-size:15px;width:24px;text-align:right}
+  .epm-table .ep-tag{display:inline-block;font-size:10px;color:var(--text-2);background:var(--surface-3);padding:1px 7px;border-radius:var(--r-pill);margin-left:5px}
+  /* 端点详情视图 */
+  .lib-detail{max-width:1000px;margin:0 auto;padding:6px 8px 48px}
+  .detail-crumb{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-bottom:14px}
+  .detail-crumb a{color:var(--accent);cursor:pointer;font-weight:600}
+  .detail-crumb a:hover{text-decoration:underline}
+  .detail-head{display:flex;align-items:center;gap:11px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:4px}
+  .detail-head .dh-path{font-family:var(--mono);font-size:15px;font-weight:600;color:var(--text)}
+  .detail-head .dh-sum{font-size:12px;color:var(--muted);width:100%;margin-top:2px}
+  .detail-sec{margin-top:30px}
+  .detail-sec > h3{font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .detail-sec > h3 .sc{font-size:11px;font-weight:600;color:var(--text-2);background:var(--surface-3);padding:2px 9px;border-radius:var(--r-pill);font-family:var(--mono)}
+  /* 可编辑 API 文档 */
+  .apidoc{border:1px solid var(--border);border-radius:var(--r);background:var(--surface);box-shadow:var(--sh-1);padding:20px 24px}
+  .apidoc .ad-row{display:grid;grid-template-columns:84px 1fr;gap:9px 16px;align-items:start;margin-bottom:6px}
+  .apidoc .ad-row > label{font-size:12px;color:var(--muted);font-weight:600;padding-top:7px}
+  .apidoc .ed{font-size:13px;color:var(--text);background:var(--surface-2);border:1px solid transparent;border-radius:var(--r-sm);padding:6px 9px;min-height:32px;transition:.12s;outline:none}
+  .apidoc .ed:hover{background:var(--surface-3)}
+  .apidoc .ed:focus{border-color:var(--accent);background:var(--surface)}
+  .apidoc .ad-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding-top:5px}
+  .apidoc .ad-tags .tg{font-size:11px;background:var(--accent-soft);color:var(--accent-strong);border-radius:var(--r-pill);padding:3px 9px}
+  .apidoc .ad-tags .tg b{margin-left:6px;cursor:pointer;opacity:.6;font-weight:700}
+  .apidoc .ad-tags .tg b:hover{opacity:1}
+  .apidoc .ad-tags .add-tag{font-size:11px;color:var(--accent);cursor:pointer;border:1px dashed var(--accent-soft);border-radius:var(--r-pill);padding:3px 10px}
+  .apidoc .ad-tags .add-tag:hover{background:var(--accent-soft)}
+  /* 字段定义表 */
+  .fdef{margin-top:16px;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
+  .fdef-title{font-size:12px;font-weight:700;color:var(--text-2);padding:11px 12px 4px}
+  .fdef-title .sc{font-size:10px;font-weight:600;color:var(--text-2);background:var(--surface-3);padding:2px 8px;border-radius:var(--r-pill);margin-left:6px;font-family:var(--mono)}
+  .fdef table{width:100%;border-collapse:collapse;font-size:12px}
+  .fdef thead th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--muted);background:var(--surface-2);padding:8px 10px;border-bottom:1px solid var(--border)}
+  .fdef tbody td{padding:4px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+  .fdef tbody tr:last-child td{border-bottom:0}
+  .fdef .finput{width:100%;border:1px solid transparent;background:transparent;font:inherit;color:inherit;padding:5px 7px;border-radius:var(--r-sm)}
+  .fdef .finput.f-desc{font-family:var(--font)}
+  .fdef .finput:hover{background:var(--surface-2)}
+  .fdef .finput:focus{outline:none;border-color:var(--accent);background:var(--surface)}
+  .fdef .f-req{text-align:center;width:44px}
+  .fdef .f-req .sw{display:inline-block;min-width:30px;text-align:center;font-size:10px;font-weight:700;border-radius:var(--r-pill);padding:2px 6px;cursor:pointer}
+  .fdef .f-req .sw.on{background:rgba(226,72,59,.12);color:var(--danger)}
+  .fdef .f-req .sw.off{background:var(--surface-3);color:var(--muted)}
+  .fdef .fdel{color:var(--muted);cursor:pointer;font-size:13px;text-align:center;width:28px}
+  .fdef .fdel:hover{color:var(--danger)}
+  .fdef .fempty{font-size:11.5px;color:var(--muted);padding:12px 10px}
+  .fdef .fadd{display:inline-block;margin:8px 0 10px 10px;font-size:11.5px;color:var(--accent);cursor:pointer;font-weight:600}
+  .fdef .fadd:hover{text-decoration:underline}
+
+  /* ============ 导出（独立大功能） ============ */
+  .exp-wrap{max-width:960px;margin:0 auto;padding:22px 26px 110px}
+  .exp-head{margin-bottom:18px}
+  .exp-head h1{font-size:22px;margin:0 0 4px;font-weight:700}
+  .exp-sub{color:var(--text-2);font-size:13px}
+  .exp-stats{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+  .exp-stat{background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;min-width:118px}
+  .exp-stat b{display:block;font-size:20px;color:var(--accent-strong);line-height:1.2}
+  .exp-stat span{font-size:11.5px;color:var(--text-2)}
+  .exp-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+  .exp-card h3{margin:0 0 3px;font-size:14px;font-weight:600}
+  .exp-card .hint{margin:0 0 14px;font-size:12px;color:var(--text-2)}
+  .fmt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:12px}
+  .fmt-card{border:1.5px solid var(--border);border-radius:12px;padding:14px;cursor:pointer;transition:.15s;background:var(--surface-2)}
+  .fmt-card:hover{border-color:var(--accent-soft-2)}
+  .fmt-card.sel{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 3px var(--accent-soft)}
+  .fmt-ic{font-size:20px;margin-bottom:8px}
+  .fmt-card .ft{font-weight:600;font-size:13.5px}
+  .fmt-card .fd{font-size:11.5px;color:var(--text-2);margin-top:3px;line-height:1.5}
+  .seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-pill);padding:3px;gap:2px}
+  .seg-btn{border:none;background:transparent;padding:6px 14px;border-radius:var(--r-pill);font-size:12.5px;color:var(--text-2);cursor:pointer;transition:.15s}
+  .seg-btn.on{background:var(--accent);color:#fff;font-weight:600}
+  .exp-cond{margin-top:14px}
+  .exp-select{width:100%;max-width:340px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:13px;color:var(--text)}
+  .chk-list{margin-top:12px;border:1px solid var(--border);border-radius:12px;overflow:auto;max-height:280px}
+  .chk-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--border);cursor:pointer}
+  .chk-item:first-child{border-top:none}
+  .chk-item input{width:15px;height:15px;accent-color:var(--accent);flex:0 0 15px}
+  .chk-item .cp{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:var(--text)}
+  .chk-item .cm{font-size:11px;color:var(--text-2);margin-left:auto}
+  .mask-row{display:flex;align-items:center;gap:14px;padding:11px 0;border-top:1px solid var(--border)}
+  .mask-row:first-of-type{border-top:none}
+  .mask-row .lbl{flex:1}
+  .mask-row .lbl b{font-size:13px;font-weight:600}
+  .mask-row .lbl span{display:block;font-size:11.5px;color:var(--text-2);margin-top:2px}
+  .mask-map{display:flex;gap:6px;align-items:center}
+  .mask-map input{width:56px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r-sm);text-align:center;font-size:12px;background:var(--surface)}
+  .mask-preview{margin-top:10px;font-size:11.5px;color:var(--text-2);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--surface-2);padding:8px 10px;border-radius:var(--r-sm);line-height:1.6;white-space:pre-wrap}
+  .exp-bar{position:sticky;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:12px 26px;display:flex;align-items:center;gap:14px;margin-top:8px}
+  .exp-bar .grow{flex:1}
+  .exp-bar .est{font-size:12.5px;color:var(--text-2)}
+  .toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%) translateY(20px);background:#1f2937;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.25);opacity:0;transition:.25s;z-index:80;max-width:84vw}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast b{color:#7dffce;font-weight:600}
+  .exp-modal{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;z-index:90;padding:24px}
+  .exp-modal.open{display:flex}
+  .exp-mbox{background:var(--surface);border-radius:14px;width:min(640px,92vw);max-height:84vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .exp-mhead{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center}
+  .exp-mhead h3{margin:0;font-size:15px;font-weight:600}
+  .exp-mhead .x{margin-left:auto;cursor:pointer;color:var(--text-2);font-size:22px;line-height:1;padding:0 4px}
+  .exp-mbody{padding:16px 20px;overflow:auto}
+  .exp-mbody pre{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.6;color:var(--text);white-space:pre-wrap;background:var(--surface-2);padding:14px;border-radius:10px;max-height:48vh;overflow:auto}
+  .exp-mfoot{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end}
+
+  /* ============ Settings ============ */
+  .set-wrap{max-width:720px}
+  .set-sec{margin-bottom:22px}
+  .set-sec h3{font-size:14px;margin:0 0 4px}
+  .set-sec p{font-size:12px;color:var(--muted);margin:0 0 14px}
+  .set-row{display:flex;align-items:center;gap:14px;padding:13px 0;border-top:1px solid var(--border)}
+  .set-row .lbl{flex:1}
+  .set-row .lbl b{font-weight:600;font-size:13px} .set-row .lbl span{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+  .switch{width:42px;height:24px;border-radius:var(--r-pill);background:var(--border-strong);position:relative;cursor:pointer;transition:.18s;flex:0 0 42px}
+  .switch.on{background:var(--accent)}
+  .switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.18s;box-shadow:var(--sh-1)}
+  .switch.on::after{left:21px}
+
+  /* ============ Command Palette ============ */
+  .cmdk{position:fixed;inset:0;background:rgba(16,32,28,.32);backdrop-filter:blur(3px);display:none;align-items:flex-start;justify-content:center;padding-top:13vh;z-index:50}
+  .cmdk.open{display:flex;animation:fade .15s ease}
+  .cmdk-box{width:560px;max-width:92vw;background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--sh-pop);overflow:hidden;border:1px solid var(--border)}
+  .cmdk-in{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--border)}
+  .cmdk-in input{flex:1;border:0;outline:none;font-size:15px;font-family:inherit;background:transparent;color:var(--text)}
+  .cmdk-list{max-height:340px;overflow:auto;padding:8px}
+  .cmdk-grp{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.5px;padding:10px 12px 5px}
+  .cmdk-it{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:var(--r-sm);cursor:pointer}
+  .cmdk-it:hover,.cmdk-it.sel{background:var(--accent-soft)}
+  .cmdk-it .ci{width:28px;height:28px;border-radius:7px;background:var(--surface-2);display:grid;place-items:center;color:var(--text-2)}
+  .cmdk-it .ct{font-weight:600;font-size:13px} .cmdk-it .cd{font-size:11.5px;color:var(--muted)}
+  .cmdk-it kbd{margin-left:auto;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 7px;font-size:10.5px;font-family:var(--mono);color:var(--muted)}
+  ::-webkit-scrollbar{width:10px;height:10px} ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:10px;border:2px solid var(--surface)} ::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ============ Sidebar ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">🍶</div>
+      <div><div class="name">API Recorder</div><div class="sub">API 录制 · Mock</div></div>
+    </div>
+
+    <div class="nav-label">工作区</div>
+    <div class="nav-item" data-go="overview">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      <span>概览</span>
+    </div>
+    <div class="nav-item active" data-go="recorder">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h3l3 7 4-14 3 7h5"/></svg>
+      <span>录制</span>
+      <span class="badge">37</span>
+    </div>
+    <div class="nav-item" data-go="mock">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6M10 3v6l-4 8a2 2 0 0 0 2 3h8a2 2 0 0 0 2-3l-4-8V3"/></svg>
+      <span>Mock 服务</span>
+      <span class="badge">152</span>
+    </div>
+    <div class="nav-item" data-go="library">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5a2 2 0 0 1 2-2h6v16H6a2 2 0 0 0-2 2zM20 5a2 2 0 0 0-2-2h-6v16h6a2 2 0 0 1 2 2z"/></svg>
+      <span>请求库</span>
+    </div>
+    <div class="nav-item" data-go="export">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
+      <span>导出</span>
+    </div>
+
+    <div class="nav-label">系统</div>
+    <div class="nav-item" data-go="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2l-.3-2.5H9.7l-.3 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.3 2.5h4.6l.3-2.5a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg>
+      <span>设置</span>
+    </div>
+
+    <div class="sb-spacer"></div>
+    <div class="rec-pill" id="recPill"><span class="rec-dot"></span><span id="recTxt">空闲中</span></div>
+  </aside>
+
+  <!-- ============ Content ============ -->
+  <div class="content">
+    <header class="topbar">
+      <div class="ttl" id="topTitle">录制<small id="topSub">实时捕获浏览器请求，按域名组织</small></div>
+      <div class="grow"></div>
+      <div class="cmdk-trigger" id="cmdkTrigger">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+        搜索或执行命令<kbd>Ctrl K</kbd>
+      </div>
+      <div class="icon-btn" title="外观"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/></svg></div>
+    </header>
+
+    <main>
+      <!-- ===== Overview ===== -->
+      <section class="screen" data-screen="overview">
+        <div class="ov-hero">
+          <div><h1>下午好，老爸 👋</h1><p>今天已录制 37 条请求，Mock 服务处理了 152 次命中。</p></div>
+          <button class="btn btn-primary" data-go="recorder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="6"/></svg>开始录制</button>
+        </div>
+        <div class="stats">
+          <div class="card stat"><div class="k"><span class="ico">📡</span>总请求数</div><div class="v">1,284</div><div class="d">▲ 37 今日</div></div>
+          <div class="card stat"><div class="k"><span class="ico">⏺</span>本次录制</div><div class="v">37</div><div class="d">进行中</div></div>
+          <div class="card stat"><div class="k"><span class="ico">🧪</span>Mock 命中</div><div class="v">152</div><div class="d">▲ 12 今日</div></div>
+          <div class="card stat"><div class="k"><span class="ico">📚</span>已保存集合</div><div class="v">6</div><div class="d">最近更新 2h 前</div></div>
+        </div>
+        <div class="ov-grid">
+          <div class="card card-pad">
+            <div class="section-title">快捷操作 <span class="line"></span></div>
+            <div class="quick">
+              <div class="qbtn" data-go="recorder"><span class="qi">⏺</span><b>开始录制</b><span>拉起浏览器捕获流量</span></div>
+              <div class="qbtn" data-go="mock"><span class="qi">🧪</span><b>启动 Mock</b><span>用录制库对外服务</span></div>
+              <div class="qbtn" id="qImport"><span class="qi">📥</span><b>导入 HAR/JSON</b><span>合并历史抓包</span></div>
+            </div>
+            <div class="section-title" style="margin-top:22px">最近活动 <span class="line"></span></div>
+            <div class="act-item"><span class="mbadge m-GET">GET</span><div style="flex:1;min-width:0"><div class="t">/api/v1/oa/flow/list</div><div class="d">api.example.com · 200 · 18ms</div></div><span class="tm">2m</span></div>
+            <div class="act-item"><span class="mbadge m-POST">POST</span><div style="flex:1;min-width:0"><div class="t">/api/v1/oa/approval/submit</div><div class="d">api.example.com · 200 · 64ms</div></div><span class="tm">9m</span></div>
+            <div class="act-item"><span class="mbadge m-PUT">PUT</span><div style="flex:1;min-width:0"><div class="t">/api/v1/user/profile</div><div class="d">srv.internal · 400 · 22ms</div></div><span class="tm">21m</span></div>
+            <div class="act-item"><span class="mbadge m-DELETE">DELETE</span><div style="flex:1;min-width:0"><div class="t">/api/v1/session/cache</div><div class="d">srv.internal · 204 · 9ms</div></div><span class="tm">1h</span></div>
+          </div>
+          <div class="card card-pad">
+            <div class="section-title">录制状态 <span class="line"></span></div>
+            <div class="rec-pill live" style="margin-bottom:14px"><span class="rec-dot"></span><span>录制进行中 · 37 条</span></div>
+            <div style="font-size:12.5px;color:var(--text-2);line-height:1.9">
+              <div class="row" style="justify-content:space-between"><span class="muted">内核</span><b>自带 Chromium</b></div>
+              <div class="row" style="justify-content:space-between"><span class="muted">起始 URL</span><b style="font-family:var(--mono);font-size:11.5px">about:blank</b></div>
+              <div class="row" style="justify-content:space-between"><span class="muted">Mock 端口</span><b style="font-family:var(--mono);font-size:11.5px">127.0.0.1:51234</b></div>
+            </div>
+            <div class="section-title" style="margin-top:20px">提示 <span class="line"></span></div>
+            <p class="muted" style="font-size:12px;margin:0">按 <kbd style="font-family:var(--mono)">Ctrl K</kbd> 打开命令面板，可秒切页面、启停录制、快速导入。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Recorder ===== -->
+      <section class="screen active" data-screen="recorder">
+        <div class="rec-layout">
+          <div class="card panel">
+            <div class="control-bar">
+              <select class="select"><option>自带 Chromium</option><option>本机浏览器</option></select>
+              <input class="input" style="flex:1;min-width:130px" placeholder="起始 URL（about:blank）" />
+              <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="6"/></svg>录制</button>
+              <button class="btn">停止</button>
+              <button class="btn btn-ghost">清空</button>
+            </div>
+            <div class="filter-bar">
+              <div class="search"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg><input placeholder="搜索 URL / 域名 / 请求体…" /></div>
+              <select class="select btn-sm"><option>所有方法</option><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select>
+              <label class="chip"><input type="checkbox" />仅 API</label>
+              <label class="chip"><input type="checkbox" />仅错误</label>
+            </div>
+            <div class="tree">
+              <div class="grp-head">api.example.com <span class="cnt">21</span></div>
+              <div class="req-row sel"><span class="mbadge m-GET">GET</span><span class="p">/api/v1/oa/flow/list</span><span class="st s-200" style="color:var(--success)">200</span><span class="tm">18ms</span></div>
+              <div class="req-row"><span class="mbadge m-POST">POST</span><span class="p">/api/v1/oa/approval/submit</span><span class="st" style="color:var(--success)">200</span><span class="tm">64ms</span></div>
+              <div class="req-row"><span class="mbadge m-POST">POST</span><span class="p">/api/v1/oa/notice/read</span><span class="st" style="color:var(--success)">200</span><span class="tm">31ms</span></div>
+              <div class="grp-head">srv.internal <span class="cnt">9</span></div>
+              <div class="req-row"><span class="mbadge m-PUT">PUT</span><span class="p">/api/v1/user/profile</span><span class="st" style="color:var(--warning)">400</span><span class="tm">22ms</span></div>
+              <div class="req-row"><span class="mbadge m-DELETE">DELETE</span><span class="p">/api/v1/session/cache</span><span class="st" style="color:var(--success)">204</span><span class="tm">9ms</span></div>
+              <div class="grp-head">cdn.assets <span class="cnt">7</span></div>
+              <div class="req-row"><span class="mbadge m-GET">GET</span><span class="p">/static/app.9f3c.js</span><span class="st" style="color:var(--success)">200</span><span class="tm">3ms</span></div>
+            </div>
+          </div>
+
+          <div class="card panel">
+            <div class="detail-top">
+              <div class="row" style="gap:9px;margin-bottom:8px">
+                <span class="mbadge m-GET">GET</span>
+                <span class="chip" style="background:#e7f6ee;color:var(--success);border-color:transparent">200 OK</span>
+                <span class="chip">18 ms</span>
+                <span class="chip">1.2 KB</span>
+                <div class="grow" style="flex:1"></div>
+                <button class="btn btn-sm">编辑</button>
+                <button class="btn btn-sm">复制</button>
+                <button class="btn btn-sm btn-ghost">注释</button>
+                <button class="btn btn-sm btn-ghost">导出</button>
+              </div>
+              <div class="u">https://api.example.com/api/v1/oa/flow/list?page=1&amp;size=20</div>
+            </div>
+            <div class="tabs">
+              <div class="tab">概览</div><div class="tab">请求头</div><div class="tab">请求体</div>
+              <div class="tab">响应头</div><div class="tab on">响应体</div>
+            </div>
+            <div class="detail-body">
+              <div class="tabpane">概览占位</div>
+              <div class="tabpane">请求头占位</div>
+              <div class="tabpane">请求体占位</div>
+              <div class="tabpane">响应头占位</div>
+              <div class="tabpane on">
+                <div class="json" style="margin:14px 16px">
+                  <div class="jline"><span class="jln">1</span><span class="jct"><span class="fold">▼</span> <span class="j-punc">{</span></span></div>
+                  <div class="children">
+                    <div class="jline"><span class="jln">2</span><span class="jct">  <span class="j-key">"code"</span><span class="j-punc">:</span> <span class="j-num">0</span><span class="j-punc">,</span></span></div>
+                    <div class="jline"><span class="jln">3</span><span class="jct">  <span class="j-key">"message"</span><span class="j-punc">:</span> <span class="j-str">"success"</span><span class="j-punc">,</span></span></div>
+                    <div class="jline"><span class="jln">4</span><span class="jct"><span class="fold">▼</span>  <span class="j-key">"data"</span><span class="j-punc">:</span> <span class="j-punc">{</span></span></div>
+                    <div class="children">
+                      <div class="jline"><span class="jln">5</span><span class="jct">    <span class="j-key">"total"</span><span class="j-punc">:</span> <span class="j-num">1284</span><span class="j-punc">,</span></span></div>
+                      <div class="jline"><span class="jln">6</span><span class="jct"><span class="fold">▼</span>    <span class="j-key">"items"</span><span class="j-punc">:</span> <span class="j-punc">[</span></span></div>
+                      <div class="children">
+                        <div class="jline"><span class="jln">7</span><span class="jct"><span class="fold">▼</span>      <span class="j-punc">{</span></span></div>
+                        <div class="children">
+                          <div class="jline ann"><span class="jln">8</span><span class="jct">        <span class="j-key">"id"</span><span class="j-punc">:</span> <span class="j-num">1001</span><span class="j-punc">,</span><span class="j-ann">✎ 张三的待办</span></span></div>
+                          <div class="jline"><span class="jln">9</span><span class="jct">        <span class="j-key">"title"</span><span class="j-punc">:</span> <span class="j-str">"边境通行证审批"</span><span class="j-punc">,</span></span></div>
+                          <div class="jline"><span class="jln">10</span><span class="jct">        <span class="j-key">"status"</span><span class="j-punc">:</span> <span class="j-str">"PENDING"</span></span></div>
+                          <div class="jline"><span class="jln">11</span><span class="jct">      <span class="j-punc">}</span><span class="j-punc">,</span></span></div>
+                        </div>
+                        <div class="jline"><span class="jln">12</span><span class="jct">      <span class="j-punc">{</span> <span class="j-muted">… 共 20 条</span> <span class="j-punc">}</span></span></div>
+                        <div class="jline"><span class="jln">13</span><span class="jct">    <span class="j-punc">]</span></span></div>
+                      </div>
+                      <div class="jline"><span class="jln">14</span><span class="jct">  <span class="j-punc">}</span></span></div>
+                    </div>
+                    <div class="jline"><span class="jln">15</span><span class="jct"><span class="j-punc">}</span></span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Mock ===== -->
+      <section class="screen" data-screen="mock">
+        <div class="control-bar card" style="margin-bottom:18px;padding:13px 16px">
+          <label class="field"><label>端口</label><input class="input" style="width:90px" value="51234" /></label>
+          <span class="chip">Mock 地址：<b style="font-family:var(--mono);color:var(--accent-strong)">http://127.0.0.1:51234</b></span>
+          <div class="grow" style="flex:1"></div>
+          <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 4 12 8-12 8z"/></svg>启动 Mock</button>
+          <button class="btn" disabled>停止</button>
+          <button class="btn btn-ghost">刷新</button>
+        </div>
+        <div class="mock-layout">
+          <div class="card panel">
+            <div class="panel-head">接口列表 <span class="muted" style="font-weight:600;margin-left:6px">(37)</span>
+              <div class="grow" style="flex:1"></div>
+              <input class="input btn-sm" style="width:160px" placeholder="过滤：方法/路径/备注" />
+            </div>
+            <div class="mock-list">
+              <div class="mock-card">
+                <span class="mbadge m-GET">GET</span>
+                <div class="meta"><div class="pa">/api/v1/oa/flow/list</div><div class="nt">默认返回 · 200</div></div>
+                <span class="star on">★</span>
+                <span class="hits"><b>86</b><br>命中</span>
+              </div>
+              <div class="mock-card">
+                <span class="mbadge m-POST">POST</span>
+                <div class="meta"><div class="pa">/api/v1/oa/approval/submit</div><div class="nt">按请求体匹配 · 200</div></div>
+                <span class="star on">★</span>
+                <span class="hits"><b>41</b><br>命中</span>
+              </div>
+              <div class="mock-card">
+                <span class="mbadge m-PUT">PUT</span>
+                <div class="meta"><div class="pa">/api/v1/user/profile</div><div class="nt">默认返回 · 400（待修）</div></div>
+                <span class="star">★</span>
+                <span class="hits"><b>3</b><br>命中</span>
+              </div>
+              <div class="mock-card">
+                <span class="mbadge m-DELETE">DELETE</span>
+                <div class="meta"><div class="pa">/api/v1/session/cache</div><div class="nt">默认返回 · 204</div></div>
+                <span class="star">★</span>
+                <span class="hits"><b>22</b><br>命中</span>
+              </div>
+            </div>
+          </div>
+          <div class="card panel">
+            <div class="panel-head">处理记录 <span class="muted" style="font-weight:600;margin-left:6px">(152)</span></div>
+            <div class="log-list">
+              <div class="log-row"><span class="mbadge m-GET">GET</span><span class="pa">/api/v1/oa/flow/list</span><span class="s-dot s-200"></span><span class="lt">18ms</span></div>
+              <div class="log-row"><span class="mbadge m-POST">POST</span><span class="pa">/api/v1/oa/approval/submit</span><span class="s-dot s-200"></span><span class="lt">64ms</span></div>
+              <div class="log-row"><span class="mbadge m-POST">POST</span><span class="pa">/api/v1/oa/notice/read</span><span class="s-dot s-200"></span><span class="lt">31ms</span></div>
+              <div class="log-row"><span class="mbadge m-PUT">PUT</span><span class="pa">/api/v1/user/profile</span><span class="s-dot s-4xx"></span><span class="lt">22ms</span></div>
+              <div class="log-row"><span class="mbadge m-DELETE">DELETE</span><span class="pa">/api/v1/session/cache</span><span class="s-dot s-200"></span><span class="lt">9ms</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Library（请求库）· 清单 + 端点详情（可编辑 API 文档） ===== -->
+      <section class="screen" data-screen="library">
+        <div class="lib-doc">
+          <!-- 左：文档目录 -->
+          <div class="lib-outline">
+            <div class="panel-head">目录 <span class="muted" style="font-weight:600;margin-left:4px" id="libOutlineCount"></span></div>
+            <div class="ol-search-wrap"><input class="input btn-sm ol-search" id="libOutlineSearch" placeholder="过滤归属 / 端点" /></div>
+            <div class="ol-tree" id="libOutline"></div>
+          </div>
+          <!-- 右：文档正文 -->
+          <div class="lib-doc-body" id="libDocBody"></div>
+        </div>
+      </section>
+
+      <!-- ===== Settings ===== -->
+      <section class="screen" data-screen="export">
+        <div class="exp-wrap" id="expWrap"></div>
+      </section>
+
+      <section class="screen" data-screen="settings">
+        <div class="set-wrap">
+          <div class="set-sec">
+            <h3>通用</h3><p>端口与运行参数</p>
+            <div class="set-row"><div class="lbl"><b>服务端口</b><span>程序启动时绑定，修改后需重启</span></div><input class="input" style="width:100px" value="9000" /></div>
+            <div class="set-row"><div class="lbl"><b>Mock 端口</b><span>独立端口，供被测程序对接；留空 = 每次随机</span></div><input class="input" style="width:100px" placeholder="自动" /></div>
+          </div>
+          <div class="set-sec">
+            <h3>脱敏</h3><p>导出 HAR / JSON 时生效，保护敏感字段</p>
+            <div class="set-row"><div class="lbl"><b>启用脱敏导出</b><span>中文 / 数字 / 英文 按规则替换</span></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+            <div class="set-row"><div class="lbl"><b>替换映射</b><span>中文→测 · 数字→1 · 英文→a</span></div><div class="row" style="gap:6px"><input class="input btn-sm" style="width:54px" value="测"/><input class="input btn-sm" style="width:54px" value="1"/><input class="input btn-sm" style="width:54px" value="a"/></div></div>
+          </div>
+          <div class="set-sec">
+            <h3>浏览器内核</h3><p>录制流量的浏览器来源</p>
+            <div class="set-row"><div class="lbl"><b>自带 Chromium</b><span>首次启动自动下载，隔离干净</span></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+            <div class="set-row"><div class="lbl"><b>本机浏览器</b><span>使用已装 Chrome / Edge</span></div><div class="switch" onclick="this.classList.toggle('on')"></div></div>
+          </div>
+          <div class="set-sec">
+            <h3>外观</h3><p>主题（当前为浅色，青绿强调）</p>
+            <div class="set-row"><div class="lbl"><b>浅色主题</b><span>当前启用</span></div><span class="chip" style="background:var(--accent-soft);color:var(--accent-strong);border-color:transparent">已启用</span></div>
+            <div class="set-row"><div class="lbl"><b>深色主题</b><span>护眼 / 长时间录制</span></div><button class="btn btn-sm">预览</button></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+    <!-- ===== 导出预览 ===== -->
+    <div class="exp-modal" id="expModal">
+      <div class="exp-mbox">
+        <div class="exp-mhead"><h3>导出预览 · <span id="expPrevFmt"></span></h3><span class="x" id="expModalX">×</span></div>
+        <div class="exp-mbody"><pre id="expPrevBody"></pre></div>
+        <div class="exp-mfoot"><button class="btn btn-sm" id="expModalClose">关闭</button><button class="btn btn-sm btn-primary" id="expModalExport">确认导出</button></div>
+      </div>
+    </div>
+
+<!-- ============ Command Palette ============ -->
+<div class="cmdk" id="cmdk">
+  <div class="cmdk-box">
+    <div class="cmdk-in">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--muted)" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+      <input id="cmdkInput" placeholder="输入命令或搜索… (↑↓ 选择, ↵ 执行, Esc 关闭)" />
+    </div>
+    <div class="cmdk-list" id="cmdkList"></div>
+  </div>
+</div>
+
+<script>
+  // ---- 导航 ----
+  const titles={overview:["概览","今日录制与 Mock 概况"],recorder:["录制","实时捕获浏览器请求，按域名组织"],mock:["Mock 服务","用录制库对外提供模拟接口"],library:["请求库","按域名 / IP 归属，端点集合与案例"],export:["导出","将录制库导出为多种格式，支持脱敏与范围筛选"],settings:["设置","端口、脱敏、内核与外观"]};
+  function go(s){
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.go===s));
+    document.querySelectorAll('.screen').forEach(p=>p.classList.toggle('active',p.dataset.screen===s));
+      document.getElementById('topTitle').childNodes[0].nodeValue=titles[s][0];
+      document.getElementById('topSub').textContent=titles[s][1];
+      if(s==='export')renderExport();
+    }
+  document.querySelectorAll('[data-go]').forEach(el=>el.addEventListener('click',()=>go(el.dataset.go)));
+
+  // ---- 录制页：请求树选择 + 详情 Tab ----
+  document.querySelectorAll('.req-row').forEach(r=>r.addEventListener('click',()=>{
+    document.querySelectorAll('.req-row').forEach(x=>x.classList.remove('sel'));r.classList.add('sel');
+  }));
+  document.querySelectorAll('.tabs .tab').forEach(t=>t.addEventListener('click',()=>{
+    const p=t.parentElement.parentElement; p.querySelectorAll('.tab').forEach(x=>x.classList.remove('on')); t.classList.add('on');
+    const panes=p.querySelectorAll('.tabpane'); let i=[...p.querySelectorAll('.tab')].indexOf(t);
+    panes.forEach((pp,idx)=>pp.classList.toggle('on',idx===i));
+  }));
+  // JSON 折叠（演示）
+  document.querySelectorAll('.json .fold').forEach(f=>f.addEventListener('click',()=>{
+    const line=f.closest('.jline'); const block=line.parentElement;
+    const next=line.nextElementSibling; if(next&&next.classList.contains('children')){next.style.display=next.style.display==='none'?'':'none'; f.textContent=f.textContent==='▼'?'▶':'▼';}
+  }));
+  // Mock 星标
+  document.querySelectorAll('.mock-card .star').forEach(s=>s.addEventListener('click',e=>{e.stopPropagation();s.classList.toggle('on');s.textContent=s.classList.contains('on')?'★':'★';}));
+
+  // ---- 请求库：清单 + 端点详情（可编辑 API 文档） ----
+  // 数据模型：归属分组（域名/IP）> 端点集合（method+path 相同）> 案例（每次捕获）
+  //          每个端点附 API 文档：info（摘要/描述/标签/负责人）+ req / resp 字段定义
+  const LIB={
+    "oa.smarthengxin.com":{kind:"域名",note:"边检 OA 主服务",endpoints:[
+      {method:"GET",path:"/api/v1/oa/flow/list",
+       info:{summary:"获取待办流程列表",desc:"分页查询当前用户待办 OA 流程任务，支持按状态筛选。",tags:["OA","流程","待办"],owner:"后端-勤务通"},
+       req:[{name:"page",type:"int",required:true,desc:"页码，从 1 开始",example:"1"},
+            {name:"size",type:"int",required:true,desc:"每页条数",example:"20"},
+            {name:"status",type:"string",required:false,desc:"流程状态 todo/doing/done",example:"todo"}],
+       resp:[{name:"code",type:"int",required:true,desc:"业务状态码",example:"200"},
+             {name:"data.total",type:"int",required:true,desc:"总条数",example:"128"},
+             {name:"data.list",type:"array",required:true,desc:"流程列表",example:"[...]"},
+             {name:"data.list[].bizId",type:"string",required:true,desc:"业务 ID",example:"8821"},
+             {name:"data.list[].title",type:"string",required:true,desc:"流程标题",example:"出差审批"}],
+       cases:[
+        {t:"2026-08-29 14:32:10",status:200,size:"12.4 KB",q:"?page=1&size=20",dur:"18ms"},
+        {t:"2026-08-29 14:28:55",status:200,size:"11.9 KB",q:"?page=2&size=20",dur:"17ms"},
+        {t:"2026-08-29 13:05:41",status:200,size:"8.2 KB",q:"?page=1&size=10",dur:"15ms"},
+        {t:"2026-08-28 18:22:10",status:200,size:"12.1 KB",q:"?page=1&size=20",dur:"21ms"},
+        {t:"2026-08-28 09:11:03",status:200,size:"6.7 KB",q:"?page=3&size=20",dur:"14ms"},
+        {t:"2026-08-27 16:40:52",status:200,size:"12.0 KB",q:"?page=1&size=20",dur:"19ms"}]},
+      {method:"POST",path:"/api/v1/oa/approval/submit",
+       info:{summary:"提交审批",desc:"对待办流程提交审批结果（同意/驳回）。",tags:["OA","审批"],owner:"后端-勤务通"},
+       req:[{name:"bizId",type:"string",required:true,desc:"业务 ID",example:"8821"},
+            {name:"action",type:"string",required:true,desc:"approve / reject",example:"approve"},
+            {name:"comment",type:"string",required:false,desc:"审批意见",example:"同意"}],
+       resp:[{name:"code",type:"int",required:true,desc:"状态码",example:"200"},
+             {name:"msg",type:"string",required:true,desc:"结果描述",example:"ok"}],
+       cases:[
+        {t:"2026-08-29 11:20:33",status:200,size:"1.1 KB",q:"(body) bizId=8821",dur:"64ms"},
+        {t:"2026-08-29 10:58:12",status:200,size:"1.0 KB",q:"(body) bizId=8790",dur:"58ms"},
+        {t:"2026-08-28 17:02:44",status:200,size:"1.1 KB",q:"(body) bizId=8702",dur:"61ms"},
+        {t:"2026-08-28 15:33:09",status:200,size:"0.9 KB",q:"(body) bizId=8690",dur:"55ms"},
+        {t:"2026-08-27 14:10:21",status:422,size:"0.6 KB",q:"(body) bizId=8601 校验失败",dur:"40ms"}]},
+      {method:"PUT",path:"/api/v1/user/profile",
+       info:{summary:"更新用户资料",desc:"修改当前用户昵称、头像等资料。",tags:["用户"],owner:"后端-account"},
+       req:[{name:"nickname",type:"string",required:false,desc:"昵称",example:"张三"},
+            {name:"avatar",type:"string",required:false,desc:"头像 URL",example:"https://..."}],
+       resp:[{name:"code",type:"int",required:true,desc:"状态码",example:"200"}],
+       cases:[
+        {t:"2026-08-29 09:45:18",status:200,size:"0.5 KB",q:"(body) 更新昵称",dur:"22ms"},
+        {t:"2026-08-28 20:11:02",status:200,size:"0.5 KB",q:"(body) 更新头像",dur:"23ms"},
+        {t:"2026-08-27 13:09:55",status:400,size:"0.4 KB",q:"(body) 字段缺失",dur:"18ms"}]},
+      {method:"PATCH",path:"/api/v1/oa/notice/read",
+       info:{summary:"标记通知已读",desc:"将指定通知标记为已读。",tags:["OA","通知"],owner:"后端-勤务通"},
+       req:[{name:"id",type:"string",required:true,desc:"通知 ID",example:"5521"}],
+       resp:[{name:"code",type:"int",required:true,desc:"状态码",example:"200"}],
+       cases:[
+        {t:"2026-08-29 14:01:27",status:200,size:"0.3 KB",q:"?id=5521",dur:"12ms"},
+        {t:"2026-08-29 13:48:11",status:200,size:"0.3 KB",q:"?id=5518",dur:"11ms"},
+        {t:"2026-08-29 11:30:40",status:200,size:"0.3 KB",q:"?id=5502",dur:"13ms"},
+        {t:"2026-08-28 16:22:05",status:200,size:"0.3 KB",q:"?id=5490",dur:"10ms"},
+        {t:"2026-08-28 10:05:33",status:200,size:"0.3 KB",q:"?id=5477",dur:"12ms"}]}
+    ]},
+    "sso.smarthengxin.com":{kind:"域名",note:"统一登录 / 鉴权",endpoints:[
+      {method:"POST",path:"/sso/oauth/token",
+       info:{summary:"获取访问令牌",desc:"用户名密码或刷新令牌换取 access_token。",tags:["SSO","鉴权"],owner:"后端-sso"},
+       req:[{name:"grant_type",type:"string",required:true,desc:"password / refresh_token",example:"password"},
+            {name:"username",type:"string",required:true,desc:"用户名",example:"zhangsan"},
+            {name:"password",type:"string",required:true,desc:"密码",example:"******"}],
+       resp:[{name:"access_token",type:"string",required:true,desc:"访问令牌",example:"eyJ..."},
+             {name:"token_type",type:"string",required:true,desc:"令牌类型",example:"Bearer"},
+             {name:"expires_in",type:"int",required:true,desc:"有效期(秒)",example:"7200"}],
+       cases:[
+        {t:"2026-08-29 09:01:00",status:200,size:"0.8 KB",q:"grant_type=password",dur:"88ms"},
+        {t:"2026-08-28 09:00:42",status:200,size:"0.8 KB",q:"grant_type=password",dur:"92ms"},
+        {t:"2026-08-27 08:59:30",status:200,size:"0.8 KB",q:"grant_type=refresh_token",dur:"79ms"},
+        {t:"2026-08-27 08:30:14",status:401,size:"0.4 KB",q:"凭证失效",dur:"35ms"}]},
+      {method:"GET",path:"/sso/userinfo",
+       info:{summary:"获取用户信息",desc:"返回当前登录用户基本信息。",tags:["SSO","用户"],owner:"后端-sso"},
+       req:[],
+       resp:[{name:"sub",type:"string",required:true,desc:"用户唯一标识",example:"u_1001"},
+             {name:"name",type:"string",required:true,desc:"姓名",example:"张三"},
+             {name:"role",type:"string",required:true,desc:"角色",example:"admin"}],
+       cases:[
+        {t:"2026-08-29 09:02:11",status:200,size:"2.1 KB",q:"",dur:"26ms"},
+        {t:"2026-08-28 09:03:48",status:200,size:"2.0 KB",q:"",dur:"24ms"}]}
+    ]},
+    "10.2.3.4:8080":{kind:"IP",note:"内部文件服务",endpoints:[
+      {method:"GET",path:"/files/download",
+       info:{summary:"文件下载",desc:"按 fid 下载内部文件，支持大文件流式返回。",tags:["文件"],owner:"运维"},
+       req:[{name:"fid",type:"string",required:true,desc:"文件 ID",example:"9201"}],
+       resp:[{name:"stream",type:"binary",required:true,desc:"文件二进制流",example:"(binary)"}],
+       cases:[
+        {t:"2026-08-29 15:10:02",status:200,size:"3.4 MB",q:"?fid=9201",dur:"210ms"},
+        {t:"2026-08-29 14:55:39",status:200,size:"1.2 MB",q:"?fid=9198",dur:"120ms"},
+        {t:"2026-08-28 11:20:17",status:404,size:"0.3 KB",q:"?fid=9102 不存在",dur:"9ms"}]}
+    ]}
+  };
+  const libState={view:'list',active:null,filter:'',collapsed:{}};
+  const $oc=document.getElementById('libOutlineCount'),$ot=document.getElementById('libOutline'),
+        $db=document.getElementById('libDocBody'),$os=document.getElementById('libOutlineSearch');
+  const mBadge=m=>`<span class="mbadge m-${m}">${m}</span>`;
+  const epKey=ep=>`${ep.method} ${ep.path}`;
+  const stClass=s=>s>=500?'s-5xx':s>=400?'s-4xx':s>=300?'s-3xx':'s-200';
+  const slug=s=>s.replace(/[^a-zA-Z0-9]/g,'_');
+  const domId=k=>'dom-'+slug(k), epId=(k,i)=>domId(k)+'_'+i;
+  function totals(){let d=Object.keys(LIB).length,e=0,c=0;Object.values(LIB).forEach(g=>{e+=g.endpoints.length;g.endpoints.forEach(ep=>c+=ep.cases.length);});return{d,e,c};}
+  const matchEp=(ep,f)=>!f||epKey(ep).toLowerCase().includes(f)||ep.path.toLowerCase().includes(f);
+  const matchDom=(k,f)=>!f||k.toLowerCase().includes(f)||LIB[k].note.toLowerCase().includes(f)||LIB[k].endpoints.some(ep=>matchEp(ep,f));
+
+  function openEndpoint(k,i){libState.active={k,i};libState.view='detail';renderLib();if($db)$db.scrollTop=0;}
+  function backToList(){libState.view='list';libState.active=null;renderLib();if($db)$db.scrollTop=0;}
+
+  function renderOutline(){
+    const f=libState.filter.trim().toLowerCase();
+    const keys=Object.keys(LIB).filter(k=>matchDom(k,f));
+    $oc.textContent='('+keys.length+')';
+    $ot.innerHTML='';
+    keys.forEach(k=>{
+      const g=LIB[k];
+      const grp=document.createElement('div');grp.className='ol-group';
+      const head=document.createElement('div');head.className='ol-ghead'+(libState.collapsed[k]?' collapsed':'');
+      head.innerHTML=`<span class="tw">▼</span><span class="ic">${g.kind==='IP'?'🌐':'🔗'}</span>${k}<span class="gb">${g.endpoints.length}</span>`;
+      head.onclick=()=>{libState.collapsed[k]=!libState.collapsed[k];renderOutline();};
+      grp.appendChild(head);
+      g.endpoints.forEach((ep,i)=>{
+        if(f&&!matchEp(ep,f))return;
+        if(libState.collapsed[k])return;
+        const isActive=libState.view==='detail'&&libState.active&&libState.active.k===k&&libState.active.i===i;
+        const it=document.createElement('div');it.className='ol-ep'+(isActive?' active':'');it.title=epKey(ep);
+        it.innerHTML=`${mBadge(ep.method)} ${ep.path}`;
+        it.onclick=()=>openEndpoint(k,i);
+        grp.appendChild(it);
+      });
+      $ot.appendChild(grp);
+    });
+  }
+
+  // 清单视图（默认）：仅展示 API 端点清单，不含具体案例
+  function renderList(){
+    const f=libState.filter.trim().toLowerCase(), t=totals();
+    $db.innerHTML='';
+    const wrap=document.createElement('div');wrap.className='lib-list';
+    wrap.innerHTML=`<div class="lib-list-head"><h1>请求库 · API 清单</h1><div class="doc-sub">按域名 / IP 归属组织的接口清单 · 生成于 2026-08-29</div>
+      <div class="doc-stats">
+        <div class="doc-stat"><b>${t.d}</b><span>归属分组</span></div>
+        <div class="doc-stat"><b>${t.e}</b><span>接口端点</span></div>
+        <div class="doc-stat"><b>${t.c}</b><span>捕获案例</span></div>
+      </div></div>`;
+    Object.keys(LIB).filter(k=>matchDom(k,f)).forEach(k=>{
+      const g=LIB[k];
+      const sec=document.createElement('section');sec.className='epm';sec.id=domId(k);
+      sec.innerHTML=`<div class="epm-head"><span class="dh-ic">${g.kind==='IP'?'🌐':'🔗'}</span><b>${k}</b><span class="dh-note">${g.note}</span><span class="dh-count">${g.endpoints.length} 端点</span></div>`;
+      const table=document.createElement('table');table.className='epm-table';
+      table.innerHTML='<thead><tr><th style="width:64px">方法</th><th>路径</th><th>摘要</th><th style="width:60px">案例</th><th style="width:24px"></th></tr></thead>';
+      const tb=document.createElement('tbody');
+      g.endpoints.filter(ep=>matchEp(ep,f)).forEach((ep,i)=>{
+        const tr=document.createElement('tr');
+        const tags=(ep.info.tags||[]).map(t=>`<span class="ep-tag">${t}</span>`).join('');
+        tr.innerHTML=`<td>${mBadge(ep.method)}</td><td class="ep-path">${ep.path}</td><td class="ep-sum">${ep.info.summary||''}${tags}</td><td class="c-num">${ep.cases.length}</td><td class="ep-go">›</td>`;
+        tr.onclick=()=>openEndpoint(k,i);
+        tb.appendChild(tr);
+      });
+      table.appendChild(tb);sec.appendChild(table);wrap.appendChild(sec);
+    });
+    $db.appendChild(wrap);
+  }
+
+  // 端点详情：案例情况 + 可编辑 API 信息 / 字段定义
+  function renderDetail(){
+    const {k,i}=libState.active, g=LIB[k], ep=g.endpoints[i];
+    $db.innerHTML='';
+    const wrap=document.createElement('div');wrap.className='lib-detail';
+    wrap.innerHTML=`<div class="detail-crumb"><a data-act="back">请求库</a><span>/</span><span>${k}</span><span>/</span><span>${ep.method} ${ep.path}</span></div>
+      <div class="detail-head">${mBadge(ep.method)}<span class="dh-path">${ep.path}</span><div class="dh-sum">${ep.info.summary||''}</div></div>`;
+    const secCase=document.createElement('div');secCase.className='detail-sec';
+    secCase.innerHTML=`<h3>案例情况 <span class="sc">${ep.cases.length} 次捕获</span></h3>`;
+    const table=document.createElement('table');table.className='case-table';
+    table.innerHTML='<thead><tr><th>#</th><th>时间</th><th>状态</th><th>响应</th><th>耗时</th><th>参数</th></tr></thead>';
+    const tb=document.createElement('tbody');
+    ep.cases.forEach((cs,j)=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td class="c-idx">#${j+1}</td><td class="c-time">${cs.t}</td><td><span class="status ${stClass(cs.status)}">${cs.status}</span></td><td class="c-num">${cs.size}</td><td class="c-num">${cs.dur}</td><td class="c-q">${cs.q||'—'}</td>`;
+      tr.onclick=()=>toggleCase(tb,tr,ep,cs);
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);secCase.appendChild(table);wrap.appendChild(secCase);
+    const secDoc=document.createElement('div');secDoc.className='detail-sec';
+    secDoc.innerHTML=`<h3>API 信息 <span class="sc">可编辑</span></h3>`;
+    secDoc.appendChild(buildApiDoc(k,i,ep));
+    wrap.appendChild(secDoc);
+    $db.appendChild(wrap);
+    wrap.querySelectorAll('[data-act="back"]').forEach(a=>a.onclick=backToList);
+  }
+
+  function buildApiDoc(k,i,ep){
+    const ad=document.createElement('div');ad.className='apidoc';
+    const meta=document.createElement('div');
+    meta.innerHTML=`
+      <div class="ad-row"><label>摘要</label><div class="ed" contenteditable="true" data-f="summary">${ep.info.summary||''}</div></div>
+      <div class="ad-row"><label>描述</label><div class="ed" contenteditable="true" data-f="desc">${ep.info.desc||''}</div></div>
+      <div class="ad-row"><label>负责人</label><div class="ed" contenteditable="true" data-f="owner">${ep.info.owner||''}</div></div>
+      <div class="ad-row"><label>标签</label><div class="ad-tags" data-f="tags">${(ep.info.tags||[]).map((t,ti)=>`<span class="tg" data-i="${ti}">${t} <b data-del="${ti}">×</b></span>`).join('')}<span class="add-tag" data-add="tag">+ 添加标签</span></div></div>`;
+    ad.appendChild(meta);
+    ad.appendChild(buildFieldTable('请求参数','req',k,i,ep));
+    ad.appendChild(buildFieldTable('响应字段','resp',k,i,ep));
+    meta.querySelectorAll('.ed').forEach(el=>{el.onblur=()=>{ep.info[el.dataset.f]=el.textContent;};});
+    meta.querySelectorAll('[data-del]').forEach(b=>{b.onclick=()=>{ep.info.tags.splice(+b.dataset.del,1);refreshApiDoc(k,i);};});
+    meta.querySelector('[data-add="tag"]').onclick=()=>{ep.info.tags.push('新标签');refreshApiDoc(k,i);};
+    return ad;
+  }
+
+  function buildFieldTable(title,side,k,i,ep){
+    const box=document.createElement('div');box.className='fdef';
+    box.innerHTML=`<div class="fdef-title">${title} <span class="sc">${ep[side].length}</span></div>`;
+    const table=document.createElement('table');
+    table.innerHTML='<thead><tr><th style="width:22%">字段</th><th style="width:14%">类型</th><th style="width:44px" class="f-req">必填</th><th>说明</th><th style="width:28px"></th></tr></thead>';
+    const tb=document.createElement('tbody');
+    ep[side].forEach((f,fi)=>tb.appendChild(fieldRow(side,k,i,ep,f,fi)));
+    if(ep[side].length===0){const tr=document.createElement('tr');tr.innerHTML=`<td colspan="5" class="fempty">暂无字段定义，点击下方添加</td>`;tb.appendChild(tr);}
+    table.appendChild(tb);box.appendChild(table);
+    const add=document.createElement('span');add.className='fadd';add.textContent='+ 添加字段';
+    add.onclick=()=>{ep[side].push({name:'',type:'string',required:false,desc:'',example:''});refreshApiDoc(k,i);};
+    box.appendChild(add);
+    return box;
+  }
+  function fieldRow(side,k,i,ep,f,fi){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><input class="finput f-name" value="${f.name||''}"></td>
+      <td><input class="finput f-type" value="${f.type||''}"></td>
+      <td class="f-req"><span class="sw ${f.required?'on':'off'}" data-req="${fi}">${f.required?'必填':'可选'}</span></td>
+      <td><input class="finput f-desc" value="${f.desc||''}"></td>
+      <td class="fdel" data-del="${fi}">🗑</td>`;
+    const inp=tr.querySelectorAll('input');
+    inp[0].oninput=()=>f.name=inp[0].value;
+    inp[1].oninput=()=>f.type=inp[1].value;
+    inp[2].oninput=()=>f.desc=inp[2].value;
+    tr.querySelector('[data-req]').onclick=()=>{f.required=!f.required;refreshApiDoc(k,i);};
+    tr.querySelector('[data-del]').onclick=()=>{ep[side].splice(fi,1);refreshApiDoc(k,i);};
+    return tr;
+  }
+  function refreshApiDoc(k,i){const a=libState.active;if(a&&a.k===k&&a.i===i)renderDetail();}
+  function toggleCase(tb,tr,ep,cs){
+    const open=tb.querySelector('.case-detail');
+    if(open){
+      const wasThis=open.previousElementSibling===tr;
+      open.remove();
+      if(wasThis){tr.classList.remove('sel');return;}
+    }
+    const sel=tb.querySelector('tr.sel');if(sel)sel.classList.remove('sel');
+    tr.classList.add('sel');
+    const td=document.createElement('tr');td.className='case-detail';
+    td.innerHTML=`<td colspan="6"><div class="cd-grid">
+        <dt>接口</dt><dd>${ep.method} ${ep.path}</dd>
+        <dt>时间</dt><dd>${cs.t}</dd>
+        <dt>状态</dt><dd>${cs.status}</dd>
+        <dt>响应大小</dt><dd>${cs.size}</dd>
+        <dt>耗时</dt><dd>${cs.dur}</dd>
+        <dt>参数</dt><dd>${cs.q||'—'}</dd>
+      </div><div class="cd-block"><div class="lbl">响应预览（原型演示）</div><pre>// 真实界面将从录制库读取完整请求头 / 请求体 / 响应体
+{
+  "method": "${ep.method}",
+  "path": "${ep.path}",
+  "status": ${cs.status},
+  "size": "${cs.size}",
+  "duration": "${cs.dur}"
+}</pre></div></td>`;
+    tr.after(td);
+  }
+  function renderLib(){renderOutline();if(libState.view==='detail'&&libState.active)renderDetail();else renderList();}
+  renderLib();
+  $os.addEventListener('input',e=>{libState.filter=e.target.value;libState.collapsed={};if(libState.view==='detail'){libState.view='list';libState.active=null;}renderLib();});
+
+  // ---- 导出（独立大功能） ----
+  const FMTS=[
+    {id:'har',ic:'🗂️',t:'HAR',d:'完整抓包归档，含请求头 / 体 / 响应，Charles、Fiddler 可直接打开'},
+    {id:'json',ic:'🧾',t:'JSON',d:'结构化接口清单，含字段定义与案例摘要，便于二次处理'},
+    {id:'mock',ic:'🧪',t:'Mock 脚本',d:'基于录制库生成进程内 Mock 服务源码（Flask），开箱即用'},
+    {id:'openapi',ic:'📘',t:'OpenAPI 3',d:'生成 openapi.yaml，可直接导入 Swagger / Apifox'}
+  ];
+  const exportState={fmt:'json',scope:'all',scopeValue:'',maskOn:true,maskMap:{cn:'测',num:'1',en:'a'},sel:new Set()};
+  function allEndpoints(){const r=[];Object.keys(LIB).forEach(k=>LIB[k].endpoints.forEach((ep,i)=>r.push({k,i,ep})));return r;}
+  allEndpoints().forEach(x=>exportState.sel.add(x.k+'#'+x.i));
+  function allTags(){const s=new Set();allEndpoints().forEach(({ep})=>(ep.info.tags||[]).forEach(t=>s.add(t)));return [...s];}
+  function scopeEndpoints(){
+    const all=allEndpoints();
+    if(exportState.scope==='domain')return all.filter(x=>x.k===exportState.scopeValue);
+    if(exportState.scope==='tag')return all.filter(x=>(x.ep.info.tags||[]).includes(exportState.scopeValue));
+    if(exportState.scope==='manual')return all.filter(x=>exportState.sel.has(x.k+'#'+x.i));
+    return all;
+  }
+  function scopeStats(list){let e=list.length,c=0;list.forEach(x=>c+=x.ep.cases.length);return{e,c};}
+  function scopeLabel(){return exportState.scope==='all'?'全部录制':exportState.scope==='domain'?('归属 '+exportState.scopeValue):exportState.scope==='tag'?('标签 '+exportState.scopeValue):('手动 '+exportState.sel.size+' 个');}
+  function renderExport(){
+    const w=document.getElementById('expWrap'); if(!w)return;
+    const st=scopeStats(scopeEndpoints());
+    let cond='';
+    if(exportState.scope==='domain'){
+      cond=`<select class="exp-select" id="expDomain">${Object.keys(LIB).map(k=>`<option value="${k}" ${k===exportState.scopeValue?'selected':''}>${k}（${LIB[k].endpoints.length} 端点）</option>`).join('')}</select>`;
+    }else if(exportState.scope==='tag'){
+      const tags=allTags();
+      cond=`<select class="exp-select" id="expTag">${tags.map(t=>`<option value="${t}" ${t===exportState.scopeValue?'selected':''}>${t}</option>`).join('')}</select>`;
+    }else if(exportState.scope==='manual'){
+      cond=`<div class="chk-list">${allEndpoints().map(x=>`<label class="chk-item"><input type="checkbox" data-ep="${x.k}#${x.i}" ${exportState.sel.has(x.k+'#'+x.i)?'checked':''}/><span class="cp">${mBadge(x.ep.method)} ${x.ep.path}</span><span class="cm">${x.k} · ${x.ep.cases.length} 案例</span></label>`).join('')}</div>`;
+    }
+    const fmt=FMTS.find(f=>f.id===exportState.fmt);
+    w.innerHTML=`
+      <div class="exp-head">
+        <h1>导出</h1>
+        <div class="exp-sub">将录制库导出为多种格式，支持脱敏与范围筛选 · 统一写入「下载」文件夹</div>
+        <div class="exp-stats">
+          <div class="exp-stat"><b>${st.e}</b><span>接口端点</span></div>
+          <div class="exp-stat"><b>${st.c}</b><span>捕获案例</span></div>
+          <div class="exp-stat"><b>${fmt.t}</b><span>导出格式</span></div>
+        </div>
+      </div>
+      <div class="exp-card">
+        <h3>导出格式</h3><p class="hint">选择目标产物类型</p>
+        <div class="fmt-grid">${FMTS.map(f=>`<div class="fmt-card ${f.id===exportState.fmt?'sel':''}" data-fmt="${f.id}"><div class="fmt-ic">${f.ic}</div><div class="ft">${f.t}</div><div class="fd">${f.d}</div></div>`).join('')}</div>
+      </div>
+      <div class="exp-card">
+        <h3>导出范围</h3><p class="hint">决定本次导出包含哪些接口</p>
+        <div class="seg">${['all','domain','tag','manual'].map(s=>`<button class="seg-btn ${s===exportState.scope?'on':''}" data-scope="${s}">${{all:'全部录制',domain:'按归属',tag:'按标签',manual:'手动勾选'}[s]}</button>`).join('')}</div>
+        <div class="exp-cond" id="expCond">${cond}</div>
+      </div>
+      <div class="exp-card">
+        <h3>脱敏</h3><p class="hint">导出时对敏感内容按规则替换，保护真实数据</p>
+        <div class="mask-row">
+          <div class="lbl"><b>启用脱敏</b><span>开启后，导出文件中的中文 / 数字 / 英文 按映射替换</span></div>
+          <div class="switch ${exportState.maskOn?'on':''}" id="expMask"></div>
+        </div>
+        <div class="mask-row">
+          <div class="lbl"><b>替换映射</b><span>中文 → · 数字 → · 英文 →</span></div>
+          <div class="mask-map">
+            <input id="mM_cn" value="${exportState.maskMap.cn}" maxlength="2"/>
+            <input id="mM_num" value="${exportState.maskMap.num}" maxlength="2"/>
+            <input id="mM_en" value="${exportState.maskMap.en}" maxlength="2"/>
+          </div>
+        </div>
+        <div class="mask-preview" id="expMaskPrev"></div>
+      </div>
+      <div class="exp-bar">
+        <div class="est">预计导出 <b style="color:var(--accent-strong)">${st.e}</b> 个接口 / <b style="color:var(--accent-strong)">${st.c}</b> 条案例 · ${fmt.t}${exportState.maskOn?' · 已脱敏':''}</div>
+        <div class="grow"></div>
+        <button class="btn btn-sm" id="expPreview">预览</button>
+        <button class="btn btn-sm btn-primary" id="expDo">导出到下载文件夹</button>
+      </div>`;
+    w.querySelectorAll('[data-fmt]').forEach(c=>c.onclick=()=>{exportState.fmt=c.dataset.fmt;renderExport();});
+    w.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>{exportState.scope=b.dataset.scope;if(exportState.scope==='domain'&&!exportState.scopeValue)exportState.scopeValue=Object.keys(LIB)[0];if(exportState.scope==='tag'&&!exportState.scopeValue)exportState.scopeValue=allTags()[0]||'';renderExport();});
+    const ed=document.getElementById('expDomain');if(ed)ed.onchange=e=>{exportState.scopeValue=e.target.value;renderExport();};
+    const et=document.getElementById('expTag');if(et)et.onchange=e=>{exportState.scopeValue=e.target.value;renderExport();};
+    w.querySelectorAll('.chk-item input').forEach(cb=>cb.onchange=()=>{const key=cb.dataset.ep;if(cb.checked)exportState.sel.add(key);else exportState.sel.delete(key);renderExport();});
+    document.getElementById('expMask').onclick=function(){exportState.maskOn=!exportState.maskOn;renderExport();};
+    ['mM_cn','mM_num','mM_en'].forEach(id=>{const el=document.getElementById(id);el.oninput=()=>{exportState.maskMap[id.split('_')[1]]=el.value;updateMaskPrev();};});
+    document.getElementById('expPreview').onclick=showExportPreview;
+    document.getElementById('expDo').onclick=doExport;
+    updateMaskPrev();
+  }
+  function updateMaskPrev(){
+    const el=document.getElementById('expMaskPrev');if(!el)return;
+    const m=exportState.maskMap;
+    const sample='张三 13800001234 abc@corp.com 订单号 8821';
+    const out=exportState.maskOn?sample.replace(/[一-龥]/g,m.cn||'*').replace(/[0-9]/g,m.num||'*').replace(/[a-zA-Z]/g,m.en||'*'):sample;
+    el.textContent='示例：'+sample+'\n脱敏后：'+out;
+  }
+  function showExportPreview(){
+    const list=scopeEndpoints();const fmt=FMTS.find(f=>f.id===exportState.fmt);
+    let txt=`// 导出预览 — 格式：${fmt.t} · 范围：${scopeLabel()} · 脱敏：${exportState.maskOn?'开':'关'}\n// 包含 ${list.length} 个接口 / ${list.reduce((a,x)=>a+x.ep.cases.length,0)} 条案例\n\n`;
+    if(fmt.id==='openapi'){
+      txt+='openapi: "3.0.3"\ninfo:\n  title: API Recorder 导出\n  version: "2026-08-30"\npaths:\n'+list.slice(0,3).map(x=>`  ${x.ep.path}:\n    ${x.ep.method.toLowerCase()}:\n      summary: ${x.ep.info.summary||''}\n      # 请求字段 ${x.ep.req.length} · 响应字段 ${x.ep.resp.length}`).join('\n');
+    }else if(fmt.id==='mock'){
+      txt+='# Flask Mock 服务（由录制库生成）\nfrom flask import Flask\napp = Flask(__name__)\n\n'+list.slice(0,3).map(x=>`@app.route('${x.ep.path}', methods=['${x.ep.method}'])\ndef h_${x.ep.path.replace(/[^a-zA-Z0-9]/g,'_')}():\n    return {...}, 200`).join('\n\n');
+    }else{
+      const sample=list.slice(0,4).map(x=>({method:x.ep.method,path:x.ep.path,summary:x.ep.info.summary,tags:x.ep.info.tags,reqFields:x.ep.req.length,respFields:x.ep.resp.length,cases:x.ep.cases.length}));
+      txt+=JSON.stringify({format:fmt.t,generatedAt:'2026-08-30',masked:exportState.maskOn,endpoints:sample},null,2);
+    }
+    document.getElementById('expPrevFmt').textContent=fmt.t;
+    document.getElementById('expPrevBody').textContent=txt;
+    document.getElementById('expModal').classList.add('open');
+  }
+  function doExport(){
+    const fmt=FMTS.find(f=>f.id===exportState.fmt);
+    const ext={har:'har',json:'json',mock:'py',openapi:'yaml'}[fmt.id];
+    const name=`api_recorder_${exportState.fmt}_2026-08-30.${ext}`;
+    showToast('已导出到 下载文件夹 /<b>'+name+'</b>');
+    const m=document.getElementById('expModal');if(m)m.classList.remove('open');
+  }
+  function showToast(msg){
+    let t=document.createElement('div');t.className='toast';t.innerHTML=msg;document.body.appendChild(t);
+    requestAnimationFrame(()=>t.classList.add('show'));
+    setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),300);},2600);
+  }
+  document.getElementById('expModalX').onclick=()=>document.getElementById('expModal').classList.remove('open');
+  document.getElementById('expModalClose').onclick=()=>document.getElementById('expModal').classList.remove('open');
+  document.getElementById('expModalExport').onclick=doExport;
+
+  // ---- 命令面板 ----
+  const cmds=[
+    {g:'导航',i:'📊',t:'前往 概览',d:'查看今日概况',k:'G',act:()=>go('overview')},
+    {g:'导航',i:'📡',t:'前往 录制',d:'请求捕获与详情',k:'R',act:()=>go('recorder')},
+    {g:'导航',i:'🧪',t:'前往 Mock 服务',d:'接口列表与处理记录',k:'M',act:()=>go('mock')},
+    {g:'导航',i:'📚',t:'前往 请求库',d:'域名/IP 归属 · 端点集合',k:'L',act:()=>go('library')},
+    {g:'导航',i:'⚙',t:'前往 设置',d:'端口 / 脱敏 / 内核',k:',',act:()=>go('settings')},
+    {g:'操作',i:'⏺',t:'开始录制',d:'拉起浏览器捕获',act:()=>{go('recorder');document.getElementById('recPill').classList.add('live');document.getElementById('recTxt').textContent='录制进行中';}},
+    {g:'操作',i:'🧪',t:'启动 Mock 服务',d:'用当前库对外服务',act:()=>go('mock')},
+    {g:'操作',i:'📥',t:'导入 HAR / JSON',d:'合并历史抓包',act:()=>go('library')},
+    {g:'操作',i:'📤',t:'导出到文件',d:'HAR / JSON / Mock 脚本 / OpenAPI',act:()=>go('export')},
+  ];
+  const cmdk=document.getElementById('cmdk'),cin=document.getElementById('cmdkInput'),clist=document.getElementById('cmdkList');
+  let sel=0;
+  function renderCmd(filter=''){
+    clist.innerHTML=''; let lastG=''; let idx=0;
+    cmds.filter(c=>c.t.includes(filter)||c.d.includes(filter)).forEach(c=>{
+      if(c.g!==lastG){const h=document.createElement('div');h.className='cmdk-grp';h.textContent=c.g;clist.appendChild(h);lastG=c.g;}
+      const it=document.createElement('div');it.className='cmdk-it'+(idx===sel?' sel':'');
+      it.innerHTML=`<span class="ci">${c.i}</span><div><div class="ct">${c.t}</div><div class="cd">${c.d}</div></div>${c.k?`<kbd>${c.k}</kbd>`:''}`;
+      it.onclick=()=>{c.act();closeCmd();};
+      clist.appendChild(it); idx++;
+    });
+    sel=Math.min(sel,Math.max(0,idx-1));
+  }
+  function openCmd(){cmdk.classList.add('open');cin.value='';sel=0;renderCmd();setTimeout(()=>cin.focus(),30);}
+  function closeCmd(){cmdk.classList.remove('open');}
+  document.getElementById('cmdkTrigger').addEventListener('click',openCmd);
+  cin.addEventListener('input',()=>{sel=0;renderCmd(cin.value);});
+  document.addEventListener('keydown',e=>{
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();cmdk.classList.contains('open')?closeCmd():openCmd();}
+    if(!cmdk.classList.contains('open'))return;
+    if(e.key==='Escape')closeCmd();
+    if(e.key==='ArrowDown'){e.preventDefault();sel++;renderCmd(cin.value);}
+    if(e.key==='ArrowUp'){e.preventDefault();sel=Math.max(0,sel-1);renderCmd(cin.value);}
+    if(e.key==='Enter'){const list=cmds.filter(c=>c.t.includes(cin.value)||c.d.includes(cin.value));if(list[sel]){list[sel].act();closeCmd();}}
+  });
+  cmdk.addEventListener('click',e=>{if(e.target===cmdk)closeCmd();});
+</script>
+</body>
+</html>
