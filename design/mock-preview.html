@@ -1,3 +1,9 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Mock 面板 · 三级折叠预览</title>
+<style>
 :root {
   /* ---- 浅色 + 青绿（Teal）设计系统 ---- */
   --bg: #f3f7f6;
@@ -1316,3 +1322,311 @@ body { display: block; }
 .kv-val { display: table-cell; padding: 2px 8px; color: var(--text); word-break: break-all; vertical-align: top; }
 .kv-copy { display: table-cell; width: 1px; white-space: nowrap; opacity: 0; transition: opacity .1s ease; margin-left: 6px; }
 .kv-line:hover .kv-copy { opacity: 1; }
+
+body { background: var(--bg); margin: 0; padding: 24px; }
+.preview-wrap { max-width: 980px; margin: 0 auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--sh-2); }
+.preview-note { max-width: 980px; margin: 0 auto 14px; color: var(--text-2); font-size: 13px; line-height: 1.8; }
+.preview-note b { color: var(--text); }
+.preview-note code { background: var(--surface-2); padding: 1px 6px; border-radius: 4px; }
+.mock-dash { padding: 14px 18px; gap: 10px; }
+.mock-api-list { max-height: 70vh; }
+</style>
+</head>
+<body>
+<div class="preview-note">
+  <b>Mock 面板 · 三级折叠</b> —— 预览已自动展开前两层（接口组 + query 子项），单条记录详情默认折叠并限高 320px，点击卡头展开。
+  <ul>
+    <li>组头：<code>method + path</code> + 记录数 / query 数 + 「已默认 N 个 query」badge（按 query 各自默认，命中时返回各自默认）。</li>
+    <li>query 子项：<code>query 字符串</code> + 记录数 + 「默认 状态码 · 摘要」一句话标识该 query 的默认条。</li>
+    <li>记录卡：状态码 + 响应摘要 + 「默认/取消默认」「测试」「来源」按钮。点击卡头展开详情（请求体/返回体）。</li>
+  </ul>
+</div>
+<div class="preview-wrap">
+  <div class="mock-dash-head">
+                <span id="mockApisCount" class="muted">(6)</span>
+                <input id="mockSearch" class="input input-sm" style="width:210px" placeholder="过滤：方法/路径/备注/标签">
+                <select id="mockSort" class="input input-sm" style="width:auto">
+                  <option value="default">默认顺序</option>
+                  <option value="method">按方法</option>
+                  <option value="path">按路径</option>
+                  <option value="status">按状态码</option>
+                  <option value="pin">已默认优先</option>
+                </select>
+              </div>
+  <div class="mock-dash">
+    <div id="mockApiList" class="mock-api-list"><div class="mock-group expanded" data-group="GET /oa/rest/process/task/flow/list">
+      <div class="mock-group-head" title="点击展开/折叠接口">
+        <span class="method-badge m-GET">GET</span>
+        <span class="mock-group-path" title="/oa/rest/process/task/flow/list">/oa/rest/process/task/flow/list</span>
+        <span class="mock-group-count">3 条 / 2 个 query</span>
+        <span class="pin-badge" title="整接口已固定：任何请求（任意 query / 请求体）都返回这条默认">已默认 1 条</span>
+        <span class="expand-icon">▶</span>
+      </div>
+      <div class="mock-group-body">
+        <div class="mock-query-item expanded" data-qkey="t=17858036">
+            <div class="mock-query-head" title="点击展开/折叠相同 query 的记录">
+              <span class="mock-query-key">query: <code>t=17858036</code></span>
+              <span class="mock-query-count">2 条</span>
+              <span class="mock-query-pin-tip" title="该 query 一律返回本条（无视请求体差异）">默认 200 · [{"activityId":"X166616256126305416631808075187","activityNa</span>
+              <span class="expand-icon">▶</span>
+            </div>
+            <div class="mock-query-body">
+              <div class="mock-api-card" data-seq="11">
+                  <div class="mock-api-card-head">
+                    <div class="mock-api-card-meta">
+                      <span class="method-badge m-GET">GET</span>
+                      <span class="resp-badge">200</span>
+                      <span class="mock-hit-badge">命中 3</span>
+                      <span class="resp-preview" title="[{&quot;activityId&quot;:&quot;X166616255947703551288001448869&quot;,&quot;activityName&quot;:&quot;结束&quot;,&quot;name&quot;:&quot;民警办理-结束&quot;}]">[{"activityId":"X166616255947703551288001448869","activityName":"结束","name":"民警办理-结束"}]</span>
+                    </div>
+                    <div class="mock-api-card-ops">
+                      <span class="row-mark"><span class="row-tag">流程</span></span>
+                      <button class="btn btn-sm mock-pin-one" data-seq="11" title="固定：该 query 一律返回本条（无视请求体差异）">默认</button>
+                      <button class="btn btn-sm mock-test-one">测试</button>
+                      <button class="btn btn-sm mock-src-one" data-jump-seq="11" title="跳到录制页查看这条原始记录">来源</button>
+                      <span class="mock-expand-toggle" title="展开/折叠详情">▼</span>
+                    </div>
+                  </div>
+                  <div class="mock-api-card-body" style="display:none">
+                    <div class="mock-api-bodies">
+                      <div class="mock-card-section mock-req-section">
+                        <div class="mock-card-section-title">请求体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-req-summary" title="点击展开/折叠"><span class="muted">（无请求体）</span></div>
+                        <div class="mock-card-code mock-req-code" style="display:none"><div class="json-empty">（空）</div></div>
+                      </div>
+                      <div class="mock-card-section mock-res-section">
+                        <div class="mock-card-section-title">返回体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-res-summary" title="点击展开/折叠">[{"activityId":"X166616255947703551288001448869","activityName":"结束","name":"民警办理-结束"}]</div>
+                        <div class="mock-card-code mock-res-code" style="display:none"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="[{&quot;activityId&quot;:&quot;X166616255947703551288001448869&quot;,&quot;activityName&quot;:&quot;结束&quot;,&quot;name&quot;:&quot;民警办理-结束&quot;}]"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">[</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-punc">{</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">    <span class="j-key">"activityId"</span><span class="j-punc">:</span> <span class="j-string">"X166616255947703551288001448869"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">    <span class="j-key">"activityName"</span><span class="j-punc">:</span> <span class="j-string">"结束"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno">5</span></span><span class="json-code">    <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"民警办理-结束"</span></span></div><div class="json-line" data-line="6"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="7"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code"><span class="j-punc">]</span></span></div></div></div></div>
+                      </div>
+                    </div>
+                    <pre class="mock-api-result" style="display:none"></pre>
+                  </div>
+                </div><div class="mock-api-card pinned" data-seq="12">
+                  <div class="mock-api-card-head">
+                    <div class="mock-api-card-meta">
+                      <span class="method-badge m-GET">GET</span>
+                      <span class="resp-badge">200</span>
+                      <span class="mock-hit-badge">命中 12</span>
+                      <span class="resp-preview" title="[{&quot;activityId&quot;:&quot;X166616256126305416631808075187&quot;,&quot;activityName&quot;:&quot;结束&quot;,&quot;name&quot;:&quot;民警办理-结束&quot;}]">[{"activityId":"X166616256126305416631808075187","activityName":"结束","name":"民警办理-结束"}]</span>
+                    </div>
+                    <div class="mock-api-card-ops">
+                      <span class="row-mark"><span class="row-mark-note" title="默认那条">📌 默认那条</span><span class="row-tag">流程</span><span class="row-tag">默认</span></span>
+                      <button class="btn btn-sm mock-pin-one" data-seq="12" title="取消：该 query 不再固定返回本条">取消默认</button>
+                      <button class="btn btn-sm mock-test-one">测试</button>
+                      <button class="btn btn-sm mock-src-one" data-jump-seq="12" title="跳到录制页查看这条原始记录">来源</button>
+                      <span class="mock-expand-toggle" title="展开/折叠详情">▼</span>
+                    </div>
+                  </div>
+                  <div class="mock-api-card-body" style="display:none">
+                    <div class="mock-api-bodies">
+                      <div class="mock-card-section mock-req-section">
+                        <div class="mock-card-section-title">请求体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-req-summary" title="点击展开/折叠"><span class="muted">（无请求体）</span></div>
+                        <div class="mock-card-code mock-req-code" style="display:none"><div class="json-empty">（空）</div></div>
+                      </div>
+                      <div class="mock-card-section mock-res-section">
+                        <div class="mock-card-section-title">返回体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-res-summary" title="点击展开/折叠">[{"activityId":"X166616256126305416631808075187","activityName":"结束","name":"民警办理-结束"}]</div>
+                        <div class="mock-card-code mock-res-code" style="display:none"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="[{&quot;activityId&quot;:&quot;X166616256126305416631808075187&quot;,&quot;activityName&quot;:&quot;结束&quot;,&quot;name&quot;:&quot;民警办理-结束&quot;}]"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">[</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-punc">{</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">    <span class="j-key">"activityId"</span><span class="j-punc">:</span> <span class="j-string">"X166616256126305416631808075187"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">    <span class="j-key">"activityName"</span><span class="j-punc">:</span> <span class="j-string">"结束"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno">5</span></span><span class="json-code">    <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"民警办理-结束"</span></span></div><div class="json-line" data-line="6"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="7"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code"><span class="j-punc">]</span></span></div></div></div></div>
+                      </div>
+                    </div>
+                    <pre class="mock-api-result" style="display:none"></pre>
+                  </div>
+                </div>
+            </div>
+          </div><div class="mock-query-item expanded" data-qkey="t=99999999">
+            <div class="mock-query-head" title="点击展开/折叠相同 query 的记录">
+              <span class="mock-query-key">query: <code>t=99999999</code></span>
+              <span class="mock-query-count">1 条</span>
+              <span class="mock-query-pin-tip muted">未默认</span>
+              <span class="expand-icon">▶</span>
+            </div>
+            <div class="mock-query-body">
+              <div class="mock-api-card" data-seq="13">
+                  <div class="mock-api-card-head">
+                    <div class="mock-api-card-meta">
+                      <span class="method-badge m-GET">GET</span>
+                      <span class="resp-badge">200</span>
+                      <span class="mock-hit-badge">命中 3</span>
+                      <span class="resp-preview" title="[{&quot;activityId&quot;:&quot;DIFFERENT&quot;,&quot;activityName&quot;:&quot;结束&quot;,&quot;name&quot;:&quot;民警办理-结束&quot;}]">[{"activityId":"DIFFERENT","activityName":"结束","name":"民警办理-结束"}]</span>
+                    </div>
+                    <div class="mock-api-card-ops">
+                      <span class="row-mark"><span class="row-tag">流程</span></span>
+                      <button class="btn btn-sm mock-pin-one" data-seq="13" title="固定：该 query 一律返回本条（无视请求体差异）">默认</button>
+                      <button class="btn btn-sm mock-test-one">测试</button>
+                      <button class="btn btn-sm mock-src-one" data-jump-seq="13" title="跳到录制页查看这条原始记录">来源</button>
+                      <span class="mock-expand-toggle" title="展开/折叠详情">▼</span>
+                    </div>
+                  </div>
+                  <div class="mock-api-card-body" style="display:none">
+                    <div class="mock-api-bodies">
+                      <div class="mock-card-section mock-req-section">
+                        <div class="mock-card-section-title">请求体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-req-summary" title="点击展开/折叠"><span class="muted">（无请求体）</span></div>
+                        <div class="mock-card-code mock-req-code" style="display:none"><div class="json-empty">（空）</div></div>
+                      </div>
+                      <div class="mock-card-section mock-res-section">
+                        <div class="mock-card-section-title">返回体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-res-summary" title="点击展开/折叠">[{"activityId":"DIFFERENT","activityName":"结束","name":"民警办理-结束"}]</div>
+                        <div class="mock-card-code mock-res-code" style="display:none"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="[{&quot;activityId&quot;:&quot;DIFFERENT&quot;,&quot;activityName&quot;:&quot;结束&quot;,&quot;name&quot;:&quot;民警办理-结束&quot;}]"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">[</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-punc">{</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">    <span class="j-key">"activityId"</span><span class="j-punc">:</span> <span class="j-string">"DIFFERENT"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">    <span class="j-key">"activityName"</span><span class="j-punc">:</span> <span class="j-string">"结束"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno">5</span></span><span class="json-code">    <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"民警办理-结束"</span></span></div><div class="json-line" data-line="6"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="7"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code"><span class="j-punc">]</span></span></div></div></div></div>
+                      </div>
+                    </div>
+                    <pre class="mock-api-result" style="display:none"></pre>
+                  </div>
+                </div>
+            </div>
+          </div>
+      </div>
+    </div><div class="mock-group expanded" data-group="POST /oa/api/process/batchCommit">
+      <div class="mock-group-head" title="点击展开/折叠接口">
+        <span class="method-badge m-POST">POST</span>
+        <span class="mock-group-path" title="/oa/api/process/batchCommit">/oa/api/process/batchCommit</span>
+        <span class="mock-group-count">2 条 / 1 个 query</span>
+        
+        <span class="expand-icon">▶</span>
+      </div>
+      <div class="mock-group-body">
+        <div class="mock-query-item expanded" data-qkey="">
+            <div class="mock-query-head" title="点击展开/折叠相同 query 的记录">
+              <span class="mock-query-key">query: <span class="muted">&lt;无 query&gt;</span></span>
+              <span class="mock-query-count">2 条</span>
+              <span class="mock-query-pin-tip muted">未默认</span>
+              <span class="expand-icon">▶</span>
+            </div>
+            <div class="mock-query-body">
+              <div class="mock-api-card" data-seq="21">
+                  <div class="mock-api-card-head">
+                    <div class="mock-api-card-meta">
+                      <span class="method-badge m-POST">POST</span>
+                      <span class="resp-badge">200</span>
+                      <span class="mock-hit-badge">命中 3</span>
+                      <span class="resp-preview" title="{&quot;code&quot;:200,&quot;msg&quot;:&quot;success&quot;,&quot;result&quot;:true}">{"code":200,"msg":"success","result":true}</span>
+                    </div>
+                    <div class="mock-api-card-ops">
+                      <span class="row-mark"><span class="row-mark-note" title="无请求体演示">📌 无请求体演示</span></span>
+                      <button class="btn btn-sm mock-pin-one" data-seq="21" title="固定：该 query 一律返回本条（无视请求体差异）">默认</button>
+                      <button class="btn btn-sm mock-test-one">测试</button>
+                      <button class="btn btn-sm mock-src-one" data-jump-seq="21" title="跳到录制页查看这条原始记录">来源</button>
+                      <span class="mock-expand-toggle" title="展开/折叠详情">▼</span>
+                    </div>
+                  </div>
+                  <div class="mock-api-card-body" style="display:none">
+                    <div class="mock-api-bodies">
+                      <div class="mock-card-section mock-req-section">
+                        <div class="mock-card-section-title">请求体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-req-summary" title="点击展开/折叠">[{"type":"complete","taskId":"...","formKey":"fldtm","businessId":"TEST_001"}]</div>
+                        <div class="mock-card-code mock-req-code" style="display:none"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="[{&quot;type&quot;:&quot;complete&quot;,&quot;taskId&quot;:&quot;1798...&quot;,&quot;formKey&quot;:&quot;fldtm&quot;,&quot;businessId&quot;:&quot;TEST_001&quot;}]"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">[</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-punc">{</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">    <span class="j-key">"type"</span><span class="j-punc">:</span> <span class="j-string">"complete"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">    <span class="j-key">"taskId"</span><span class="j-punc">:</span> <span class="j-string">"1798..."</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno">5</span></span><span class="json-code">    <span class="j-key">"formKey"</span><span class="j-punc">:</span> <span class="j-string">"fldtm"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="6"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">    <span class="j-key">"businessId"</span><span class="j-punc">:</span> <span class="j-string">"TEST_001"</span></span></div><div class="json-line" data-line="7"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="8"><span class="json-gutter"><span class="json-lineno">8</span></span><span class="json-code"><span class="j-punc">]</span></span></div></div></div></div>
+                      </div>
+                      <div class="mock-card-section mock-res-section">
+                        <div class="mock-card-section-title">返回体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-res-summary" title="点击展开/折叠">{"code":200,"msg":"success","result":true}</div>
+                        <div class="mock-card-code mock-res-code" style="display:none"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="{&quot;code&quot;:200,&quot;msg&quot;:&quot;success&quot;,&quot;result&quot;:true}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"code"</span><span class="j-punc">:</span> <span class="j-number">200</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"msg"</span><span class="j-punc">:</span> <span class="j-string">"success"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">  <span class="j-key">"result"</span><span class="j-punc">:</span> <span class="j-boolean">true</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno">5</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div>
+                      </div>
+                    </div>
+                    <pre class="mock-api-result" style="display:none"></pre>
+                  </div>
+                </div><div class="mock-api-card" data-seq="22">
+                  <div class="mock-api-card-head">
+                    <div class="mock-api-card-meta">
+                      <span class="method-badge m-POST">POST</span>
+                      <span class="resp-badge">200</span>
+                      <span class="mock-hit-badge">命中 3</span>
+                      <span class="resp-preview" title="{&quot;code&quot;:200,&quot;msg&quot;:&quot;success&quot;,&quot;result&quot;:false}">{"code":200,"msg":"success","result":false}</span>
+                    </div>
+                    <div class="mock-api-card-ops">
+                      
+                      <button class="btn btn-sm mock-pin-one" data-seq="22" title="固定：该 query 一律返回本条（无视请求体差异）">默认</button>
+                      <button class="btn btn-sm mock-test-one">测试</button>
+                      <button class="btn btn-sm mock-src-one" data-jump-seq="22" title="跳到录制页查看这条原始记录">来源</button>
+                      <span class="mock-expand-toggle" title="展开/折叠详情">▼</span>
+                    </div>
+                  </div>
+                  <div class="mock-api-card-body" style="display:none">
+                    <div class="mock-api-bodies">
+                      <div class="mock-card-section mock-req-section">
+                        <div class="mock-card-section-title">请求体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-req-summary" title="点击展开/折叠">[{"type":"complete","taskId":"...","formKey":"fldtm","businessId":"TEST_002"}]</div>
+                        <div class="mock-card-code mock-req-code" style="display:none"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="[{&quot;type&quot;:&quot;complete&quot;,&quot;taskId&quot;:&quot;1799...&quot;,&quot;formKey&quot;:&quot;fldtm&quot;,&quot;businessId&quot;:&quot;TEST_002&quot;}]"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">[</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-punc">{</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">    <span class="j-key">"type"</span><span class="j-punc">:</span> <span class="j-string">"complete"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">    <span class="j-key">"taskId"</span><span class="j-punc">:</span> <span class="j-string">"1799..."</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno">5</span></span><span class="json-code">    <span class="j-key">"formKey"</span><span class="j-punc">:</span> <span class="j-string">"fldtm"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="6"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">    <span class="j-key">"businessId"</span><span class="j-punc">:</span> <span class="j-string">"TEST_002"</span></span></div><div class="json-line" data-line="7"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="8"><span class="json-gutter"><span class="json-lineno">8</span></span><span class="json-code"><span class="j-punc">]</span></span></div></div></div></div>
+                      </div>
+                      <div class="mock-card-section mock-res-section">
+                        <div class="mock-card-section-title">返回体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-res-summary" title="点击展开/折叠">{"code":200,"msg":"success","result":false}</div>
+                        <div class="mock-card-code mock-res-code" style="display:none"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="{&quot;code&quot;:200,&quot;msg&quot;:&quot;success&quot;,&quot;result&quot;:false}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"code"</span><span class="j-punc">:</span> <span class="j-number">200</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"msg"</span><span class="j-punc">:</span> <span class="j-string">"success"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">  <span class="j-key">"result"</span><span class="j-punc">:</span> <span class="j-boolean">false</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno">5</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div>
+                      </div>
+                    </div>
+                    <pre class="mock-api-result" style="display:none"></pre>
+                  </div>
+                </div>
+            </div>
+          </div>
+      </div>
+    </div><div class="mock-group expanded" data-group="POST /oa/api/data/saveFormData">
+      <div class="mock-group-head" title="点击展开/折叠接口">
+        <span class="method-badge m-POST">POST</span>
+        <span class="mock-group-path" title="/oa/api/data/saveFormData">/oa/api/data/saveFormData</span>
+        <span class="mock-group-count">1 条 / 1 个 query</span>
+        <span class="pin-badge" title="整接口已固定：任何请求（任意 query / 请求体）都返回这条默认">已默认 1 条</span>
+        <span class="expand-icon">▶</span>
+      </div>
+      <div class="mock-group-body">
+        <div class="mock-query-item expanded" data-qkey="">
+            <div class="mock-query-head" title="点击展开/折叠相同 query 的记录">
+              <span class="mock-query-key">query: <span class="muted">&lt;无 query&gt;</span></span>
+              <span class="mock-query-count">1 条</span>
+              <span class="mock-query-pin-tip" title="该 query 一律返回本条（无视请求体差异）">默认 200 · {"code":200,"msg":"已保存"}</span>
+              <span class="expand-icon">▶</span>
+            </div>
+            <div class="mock-query-body">
+              <div class="mock-api-card pinned" data-seq="31">
+                  <div class="mock-api-card-head">
+                    <div class="mock-api-card-meta">
+                      <span class="method-badge m-POST">POST</span>
+                      <span class="resp-badge">200</span>
+                      <span class="mock-hit-badge">命中 12</span>
+                      <span class="resp-preview" title="{&quot;code&quot;:200,&quot;msg&quot;:&quot;已保存&quot;}">{"code":200,"msg":"已保存"}</span>
+                    </div>
+                    <div class="mock-api-card-ops">
+                      <span class="row-mark"><span class="row-mark-note" title="表单保存默认">📌 表单保存默认</span><span class="row-tag">主流程</span></span>
+                      <button class="btn btn-sm mock-pin-one" data-seq="31" title="取消：该 query 不再固定返回本条">取消默认</button>
+                      <button class="btn btn-sm mock-test-one">测试</button>
+                      <button class="btn btn-sm mock-src-one" data-jump-seq="31" title="跳到录制页查看这条原始记录">来源</button>
+                      <span class="mock-expand-toggle" title="展开/折叠详情">▼</span>
+                    </div>
+                  </div>
+                  <div class="mock-api-card-body" style="display:none">
+                    <div class="mock-api-bodies">
+                      <div class="mock-card-section mock-req-section">
+                        <div class="mock-card-section-title">请求体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-req-summary" title="点击展开/折叠">[{"taskId":"...","formKey":"26f661cb582e6ba6","$form":{"id":"...","fldtm":"..."}}]</div>
+                        <div class="mock-card-code mock-req-code" style="display:none"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="[{&quot;taskId&quot;:&quot;1797...&quot;,&quot;formKey&quot;:&quot;26f661cb582e6ba6&quot;,&quot;$form&quot;:{&quot;id&quot;:&quot;1796...&quot;,&quot;fldtm&quot;:&quot;关于北京边检...&quot;}}]"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno"> 1</span></span><span class="json-code"><span class="j-punc">[</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno"> 2</span></span><span class="json-code">  <span class="j-punc">{</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno"> 3</span></span><span class="json-code">    <span class="j-key">"taskId"</span><span class="j-punc">:</span> <span class="j-string">"1797..."</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno"> 4</span></span><span class="json-code">    <span class="j-key">"formKey"</span><span class="j-punc">:</span> <span class="j-string">"26f661cb582e6ba6"</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-fold" data-start="5" data-end="8">▼</span><span class="json-lineno"> 5</span></span><span class="json-code">    <span class="j-key">"$form"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "id": "1796...",... }</span></span></div><div class="json-line" data-line="6"><span class="json-gutter"><span class="json-lineno"> 6</span></span><span class="json-code">      <span class="j-key">"id"</span><span class="j-punc">:</span> <span class="j-string">"1796..."</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="7"><span class="json-gutter"><span class="json-lineno"> 7</span></span><span class="json-code">      <span class="j-key">"fldtm"</span><span class="j-punc">:</span> <span class="j-string">"关于北京边检..."</span></span></div><div class="json-line" data-line="8"><span class="json-gutter"><span class="json-lineno"> 8</span></span><span class="json-code">    <span class="j-punc">}</span></span></div><div class="json-line" data-line="9"><span class="json-gutter"><span class="json-lineno"> 9</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="10"><span class="json-gutter"><span class="json-lineno">10</span></span><span class="json-code"><span class="j-punc">]</span></span></div></div></div></div>
+                      </div>
+                      <div class="mock-card-section mock-res-section">
+                        <div class="mock-card-section-title">返回体 <button class="btn-mini mock-card-max" data-max="" title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-res-summary" title="点击展开/折叠">{"code":200,"msg":"已保存"}</div>
+                        <div class="mock-card-code mock-res-code" style="display:none"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="{&quot;code&quot;:200,&quot;msg&quot;:&quot;已保存&quot;}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"code"</span><span class="j-punc">:</span> <span class="j-number">200</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"msg"</span><span class="j-punc">:</span> <span class="j-string">"已保存"</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div>
+                      </div>
+                    </div>
+                    <pre class="mock-api-result" style="display:none"></pre>
+                  </div>
+                </div>
+            </div>
+          </div>
+      </div>
+    </div></div>
+  </div>
+</div>
+<script>
+// 预览页：阻断 Mock 启动/停机按钮和「来源」「测试」真行为，仅保留折叠交互
+document.querySelectorAll(".mock-pin-one").forEach(function (b) {
+  b.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); var old = b.textContent; b.textContent = (b.textContent.indexOf("取消") >= 0) ? "默认" : "已默认 ✓"; b.disabled = true; setTimeout(function () { b.disabled = false; b.textContent = old; }, 900); });
+});
+document.querySelectorAll(".mock-test-one").forEach(function (b) {
+  b.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); var card = b.closest(".mock-api-card"); var body = card.querySelector(".mock-api-card-body"); if (body.style.display === "none" || body.style.display === "") { body.style.display = "block"; } var pre = card.querySelector(".mock-api-result"); pre.style.display = "block"; pre.textContent = "测试中…"; setTimeout(function () { pre.textContent = "[preview] 200 OK · (测试桩返回)"; }, 200); });
+});
+document.querySelectorAll(".mock-src-one").forEach(function (b) {
+  b.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); var old = b.textContent; b.textContent = "已跳 ✓"; b.disabled = true; setTimeout(function () { b.disabled = false; b.textContent = old; }, 900); });
+});
+</script>
+</body>
+</html>

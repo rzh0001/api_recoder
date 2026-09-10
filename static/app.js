@@ -43,8 +43,8 @@ let ws = null;
 let renderTimer = null;
 let activeSeq = null;
 let currentDetail = null;
-let recordingActive = false;  // 是否正在录制（互斥用）
-let mockRunning = false;      // Mock 是否运行中（冻结录制库用）
+let recordingActive = false;  // 是否正在录制
+let mockRunning = false;      // Mock 是否运行中
 let sortBy = "default";       // 列表排序方式：default=按时间 / url=按 API 地址
 
 // ---------------- 工具 ----------------
@@ -120,17 +120,6 @@ function pretty(text) {
   } catch (e) {
     return text;
   }
-}
-
-// 请求体/响应体的可复制代码块：右上角「复制」按钮，绕开 WebView2 下
-// 选中文本后 Ctrl+C / 右键复制不稳定的问题，保证一键复制原始内容。
-function codeBlock(text) {
-  return (
-    `<div class="code-wrap">` +
-    `<button class="btn-mini code-copy" type="button" data-copy>复制</button>` +
-    `<pre class="code">${hl(pretty(text))}</pre>` +
-    `</div>`
-  );
 }
 
 function buildHaystack(r, noReqHdr) {
@@ -217,7 +206,27 @@ function handleMsg(msg) {
     if (msg.status) updateMockUI(msg.status);
   } else if (msg.type === "mock_log") {
     loadMockLogs();
+    scheduleHitsRefresh();
   }
+}
+
+// Mock 命中计数：mock_log 推送后节流重拉 apis（服务端累计），只更新徽标数字不重建列表
+let _hitsTimer = null;
+function scheduleHitsRefresh() {
+  if (_hitsTimer) return;
+  _hitsTimer = setTimeout(() => {
+    _hitsTimer = null;
+    postJSON("/api/mock/apis", {}).then((res) => {
+      if (!res || !res.data) return;
+      const apis = res.data.apis || [];
+      apis.forEach((a) => {
+        const card = mockApiList.querySelector(`.mock-api-card[data-seq="${a.seq}"]`);
+        if (!card) return;
+        const b = card.querySelector(".mock-hit-badge");
+        if (b) b.textContent = "命中 " + (Number(a.hits) || 0);
+      });
+    }).catch(() => {});
+  }, 300);
 }
 
 // ---------------- 状态/统计 ----------------
@@ -242,12 +251,9 @@ function updateStatus(info) {
   applyLocks();
 }
 
-// ---------------- 互斥 / 冻结控制 ----------------
-// 模型 A（快照 + 互斥）：Mock 运行时冻结录制库（禁用 开始录制/导入/清空），
-// 避免启动后的快照与录制库悄悄不一致；录制中禁用 启动 Mock（两者不能共存）。
-// 后端 /api/start、/api/mock/start 也有守卫，这里只做前端防手滑 + tooltip 提示。
+// ---------------- 运行状态显示 ----------------
+// Mock 实时读库：录制 / 编辑 / 启动 Mock 互不排斥，这里只刷新运行状态显示
 function applyLocks() {
-  // Mock 现已读实时库：录制 / 编辑 / 启动 Mock 不再互斥，仅刷新状态显示
   stopBtn.disabled = !recordingActive;
   stopMockBtn.disabled = !mockRunning;
   const dot = $("statusDot"); const txt = $("statusText");
@@ -295,7 +301,7 @@ function updateMockUI(info) {
     mockSbStatsEl.textContent = "";
     loadMockApis();
   }
-  applyLocks();   // 同步冻结/恢复录制库按钮
+  applyLocks();   // 同步刷新状态显示
 }
 
 // 同步匹配模式开关状态到后端（true=严格，false=模糊）
@@ -483,6 +489,27 @@ function renderJsonGutter(text, opts) {
   const foldMap = new Map();
   folds.forEach((f, idx) => foldMap.set(f.start, idx));
 
+  // 折叠预览：开括号行被折叠时，在同一行显示内部摘要，避免只剩孤零零的 "{"
+  const openPreviews = new Map();
+  folds.forEach((f) => {
+    const openIdx = f.start - 1;
+    const closeIdx = f.end - 1;
+    const inner = [];
+    for (let k = openIdx + 1; k < closeIdx; k++) {
+      const t = lines[k].raw.trim();
+      if (t) inner.push(t);
+    }
+    const closeRaw = lines[closeIdx].raw.trim();
+    if (inner.length) {
+      const first = inner[0];
+      const truncated = first.slice(0, 40);
+      const more = inner.length > 1 || first.length > 40;
+      openPreviews.set(f.start, " " + truncated + (more ? "..." : "") + " " + closeRaw);
+    } else {
+      openPreviews.set(f.start, " " + closeRaw);
+    }
+  });
+
   const pad = String(lines.length).length;
   const annMap = (hasPaths && opts.annotations && opts.seq != null && opts.annotateTarget)
     ? opts.annotations : null;
@@ -502,16 +529,73 @@ function renderJsonGutter(text, opts) {
         (note ? `<span class="j-ann-txt"> // ${esc(note)}</span>` : "");
     }
     const lineCls = "json-line" + ((annMap && line.path && annMap[line.path]) ? " j-annotated" : "");
-    const code = (line.raw ? highlightJsonLine(line.raw) : "&nbsp;") + annHtml;
+    const collapsedPreview = openPreviews.get(lineNo);
+    const previewSpan = collapsedPreview ? `<span class="json-collapsed-preview">${esc(collapsedPreview)}</span>` : "";
+    const code = (line.raw ? highlightJsonLine(line.raw) : "&nbsp;") + previewSpan + annHtml;
     return `<div class="${lineCls}" data-line="${lineNo}"><span class="json-gutter">${gutter}</span><span class="json-code">${code}</span></div>`;
   }).join("");
 
   const rawForCopy = opts.copyRaw != null ? opts.copyRaw : (typeof text === "string" ? text : JSON.stringify(text, null, 2));
   const viewer = `<div class="json-viewer code" data-raw="${esc(rawForCopy)}">${body}</div>`;
-  if (opts.copyRaw != null) {
-    return `<div class="code-wrap">` + `<button class="btn-mini code-copy" data-copy>复制</button>` + viewer + `</div>`;
+  if (opts.copyRaw != null && !opts.hideCopyBtn) {
+    return `<div class="code-wrap">` +
+      `<span class="code-tools">` +
+      `<button class="btn-mini code-copy" data-copy>复制</button>` +
+      `<button class="btn-mini code-max" data-max title="最大化查看">⛶</button>` +
+      `</span>` +
+      viewer + `</div>`;
   }
   return viewer;
+}
+
+// ---------------- 统一数据块（JSON / 键值对同构）----------------
+// 请求体 / 响应体 / 请求头 / 响应头 / Query / Timing 全部走同一外壳：
+// 标题栏 + 复制全文 + 行号 gutter + 逐行「复制值」。
+// 解决同一详情页内多套展示形态割裂、复制入口缺失的问题。
+function renderKvViewer(obj, opts) {
+  const entries = Object.entries(obj || {});
+  const pad = String(entries.length).length;
+  const html = opts.html || {};
+  const lines = entries.map(([k, v], i) => {
+    const val = v == null ? "" : (typeof v === "string" ? v : JSON.stringify(v));
+    return (
+      `<div class="kv-line" data-line="${i + 1}">` +
+      `<span class="kv-gutter"><span class="kv-lineno">${String(i + 1).padStart(pad, " ")}</span></span>` +
+      `<span class="kv-key" title="${esc(k)}">${hl(k)}</span>` +
+      `<span class="kv-sep">:</span>` +
+      `<span class="kv-val">${html[k] != null ? html[k] : hl(val)}</span>` +
+      `<button class="btn-mini kv-copy" data-copy-value="${esc(val)}" title="复制该值">复制</button>` +
+      `</div>`
+    );
+  }).join("");
+  const raw = opts.copyRaw != null ? opts.copyRaw : JSON.stringify(obj || {}, null, 2);
+  return `<div class="kv-viewer" data-raw="${esc(raw)}">${lines}</div>`;
+}
+
+function dataBlock(payload, opts) {
+  opts = opts || {};
+  const mode = opts.mode || "json";
+  const empty = payload == null ||
+    (mode === "kv" && Object.keys(payload || {}).length === 0) ||
+    (mode === "json" && String(payload).trim() === "");
+  const body = empty
+    ? `<div class="db-empty">${esc(opts.emptyText || "（空）")}</div>`
+    : (mode === "kv" ? renderKvViewer(payload, opts) : renderJsonGutter(payload, Object.assign({}, opts, { hideCopyBtn: true })));
+  const actions = (opts.actions || [])
+    .map((a) => `<button class="btn-mini db-act" data-db-act="${esc(a.id)}"${opts.seq != null ? ` data-db-seq="${esc(String(opts.seq))}"` : ""}>${esc(a.label)}</button>`)
+    .join("");
+  return (
+    `<div class="data-block db-${mode}">` +
+    `<div class="db-head">` +
+    `<span class="db-title">${esc(opts.title || "")}</span>` +
+    `<span class="db-meta">${esc(opts.meta || "")}</span>` +
+    `<span class="db-spacer"></span>` +
+    (empty ? "" : `<button class="btn-mini db-copy" data-copy-block>复制</button>` + `<button class="btn-mini db-max" data-max title="最大化查看">⛶</button>`) +
+    actions +
+    `</div>` +
+    `<div class="db-body">${body}</div>` +
+    `</div>`
+  );
 }
 
 function renderMockApis(list) {
@@ -520,72 +604,121 @@ function renderMockApis(list) {
     mockApiList.innerHTML = `<div class="mock-api-empty">${total ? "无匹配接口（试试调整过滤词）。" : "尚无接口（仅 XHR/FETCH 类型会被模拟）。"}</div>`;
     return;
   }
-  // 按 (method, path) 分组，组内列出多条记录（不同 query / 不同响应）
+  // 三级折叠：接口（method+path） → 请求参数（query） → 记录。
+  // 全部默认折叠，点各层头部展开；记录详情默认折叠，限高避免撑爆。
   const groups = [];
   const gmap = new Map();
   list.forEach((a) => {
     const gk = (a.method || "GET").toUpperCase() + " " + a.path;
     let g = gmap.get(gk);
     if (!g) {
-      g = { key: gk, method: a.method || "GET", path: a.path || "", items: [] };
+      g = { key: gk, method: a.method || "GET", path: a.path || "", queries: [], qmap: new Map() };
       gmap.set(gk, g);
       groups.push(g);
     }
-    g.items.push(a);
+    const qk = a.query || "";
+    let q = g.qmap.get(qk);
+    if (!q) {
+      q = { key: qk, query: qk, items: [] };
+      g.qmap.set(qk, q);
+      g.queries.push(q);
+    }
+    q.items.push(a);
   });
   mockApiList.innerHTML = groups.map((g) => {
-    const pinnedCount = g.items.filter((x) => x.mock_pin).length;
+    const totalCount = g.queries.reduce((s, q) => s + q.items.length, 0);
+    const pinTotal = g.queries.reduce((s, q) => s + q.items.filter((x) => x.mock_pin).length, 0);
+    const pinTip = pinTotal === 1
+      ? "整接口已固定：任何请求（任意 query / 请求体）都返回这条默认"
+      : "多条默认（不同 query）并存：各自 query 精确命中，互不干扰";
     return `<div class="mock-group" data-group="${esc(g.key)}">
-      <div class="mock-group-head" title="点击展开/折叠">
-        <span class="method-badge m-${String(g.method || "GET").toUpperCase()}">${esc(g.method || "GET")}</span>
+      <div class="mock-group-head" title="点击展开/折叠接口">
+        <span class="method-badge m-${esc(String(g.method || "GET").toUpperCase())}">${esc(g.method || "GET")}</span>
         <span class="mock-group-path" title="${esc(g.path)}">${esc(g.path)}</span>
-        <span class="mock-group-count">${g.items.length} 条</span>
-        ${pinnedCount ? `<span class="pin-badge">已默认 ${pinnedCount}</span>` : ""}
+        <span class="mock-group-count">${totalCount} 条 / ${g.queries.length} 个 query</span>
+        ${pinTotal ? `<span class="pin-badge" title="${pinTip}">已默认 ${pinTotal} 条</span>` : ""}
         <span class="expand-icon">▶</span>
       </div>
       <div class="mock-group-body">
-        ${g.items.map((a) =>
-          `<div class="mock-api-card${a.mock_pin ? " pinned" : ""}" data-seq="${a.seq}">
-            <div class="mock-api-card-head">
-              <div class="mock-api-card-meta">
-                <span class="method-badge m-${esc(String(a.method || "GET").toUpperCase())}">${esc(a.method || "GET")}</span>
-                <span class="mock-api-card-path" title="${esc(a.path)}">${esc(a.path)}</span>
-                <span class="mock-api-card-query" title="query：${esc(a.query || "")}">${a.query ? esc(a.query) : '<span class="muted">&lt;无 query&gt;</span>'}</span>
-              </div>
-              <div class="mock-api-card-ops">
-                ${rowMarkHtml(a)}
-                <span class="resp-badge">${esc(String(a.status))}</span>
-                <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}">${a.mock_pin ? "取消默认" : "默认"}</button>
-                <button class="btn btn-sm mock-test-one">测试</button>
-                <span class="mock-expand-toggle" title="展开/折叠">▼</span>
-              </div>
+        ${g.queries.map((q) => {
+          const pinnedItem = q.items.find((x) => x.mock_pin);
+          const pinTip = pinnedItem
+            ? `<span class="mock-query-pin-tip" title="该 query 一律返回本条（无视请求体差异）">默认 ${pinnedItem.status} · ${esc((pinnedItem.body_preview || "").slice(0, 60))}</span>`
+            : `<span class="mock-query-pin-tip muted">未默认</span>`;
+          return `<div class="mock-query-item" data-qkey="${esc(q.key)}">
+            <div class="mock-query-head" title="点击展开/折叠相同 query 的记录">
+              <span class="mock-query-key">query: ${q.key ? `<code>${esc(q.key)}</code>` : `<span class="muted">&lt;无 query&gt;</span>`}</span>
+              <span class="mock-query-count">${q.items.length} 条</span>
+              ${pinTip}
+              <span class="expand-icon">▶</span>
             </div>
-            <div class="mock-api-card-body" style="display:none">
-              <div class="mock-api-bodies">
-                <div class="mock-card-section mock-req-section">
-                  <div class="mock-card-section-title">请求体</div>
-                  <div class="mock-card-summary mock-req-summary" title="点击展开/折叠">${a.req_body_preview ? esc(a.req_body_preview) : '<span class="muted">（无请求体）</span>'}</div>
-                  <div class="mock-card-code mock-req-code" style="display:none">${renderJsonGutter(a.req_body_pretty, { copyRaw: a.req_body_pretty })}</div>
-                </div>
-                <div class="mock-card-section mock-res-section">
-                  <div class="mock-card-section-title">返回体</div>
-                  <div class="mock-card-summary mock-res-summary" title="点击展开/折叠">${a.body_preview ? esc(a.body_preview) : '<span class="muted">（无响应体）</span>'}</div>
-                  <div class="mock-card-code mock-res-code" style="display:none">${renderJsonGutter(a.body_pretty, { copyRaw: a.body_pretty })}</div>
-                </div>
-              </div>
-              <pre class="mock-api-result" style="display:none"></pre>
+            <div class="mock-query-body">
+              ${q.items.map((a) =>
+                `<div class="mock-api-card${a.mock_pin ? " pinned" : ""}" data-seq="${a.seq}">
+                  <div class="mock-api-card-head">
+                    <div class="mock-api-card-meta">
+                      <span class="method-badge m-${esc(String(a.method || "GET").toUpperCase())}">${esc(a.method || "GET")}</span>
+                      <span class="resp-badge">${esc(String(a.status))}</span>
+                      <span class="mock-hit-badge">命中 ${Number(a.hits) || 0}</span>
+                      <span class="resp-preview" title="${esc(a.body_preview || "")}">${esc(a.body_preview || "")}</span>
+                    </div>
+                    <div class="mock-api-card-ops">
+                      ${rowMarkHtml(a)}
+                      <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}" title="${a.mock_pin ? "取消：该 query 不再固定返回本条" : "固定：该 query 一律返回本条（无视请求体差异）"}">${a.mock_pin ? "取消默认" : "默认"}</button>
+                      <button class="btn btn-sm mock-test-one">测试</button>
+                      <button class="btn btn-sm mock-src-one" data-jump-seq="${a.seq}" title="跳到录制页查看这条原始记录">来源</button>
+                      <span class="mock-expand-toggle" title="展开/折叠详情">▼</span>
+                    </div>
+                  </div>
+                  <div class="mock-api-card-body" style="display:none">
+                    <div class="mock-api-bodies">
+                      <div class="mock-card-section mock-req-section">
+                        <div class="mock-card-section-title">请求体 <button class="btn-mini mock-card-max" data-max title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-req-summary" title="点击展开/折叠">${a.req_body_preview ? esc(a.req_body_preview) : '<span class="muted">（无请求体）</span>'}</div>
+                        <div class="mock-card-code mock-req-code" style="display:none">${renderJsonGutter(a.req_body_pretty, { copyRaw: a.req_body_pretty })}</div>
+                      </div>
+                      <div class="mock-card-section mock-res-section">
+                        <div class="mock-card-section-title">返回体 <button class="btn-mini mock-card-max" data-max title="最大化查看">⛶</button></div>
+                        <div class="mock-card-summary mock-res-summary" title="点击展开/折叠">${a.body_preview ? esc(a.body_preview) : '<span class="muted">（无响应体）</span>'}</div>
+                        <div class="mock-card-code mock-res-code" style="display:none">${renderJsonGutter(a.body_pretty, { copyRaw: a.body_pretty })}</div>
+                      </div>
+                    </div>
+                    <pre class="mock-api-result" style="display:none"></pre>
+                  </div>
+                </div>`
+              ).join("")}
             </div>
-          </div>`
-        ).join("")}
+          </div>`;
+        }).join("")}
       </div>
     </div>`;
   }).join("");
-  // 点击组头展开/折叠
+
+  // 组头展开/折叠
   mockApiList.querySelectorAll(".mock-group-head").forEach((head) => {
     head.addEventListener("click", (e) => {
-      // 如果点的是组头内的按钮（目前组头没有按钮，但防御一下）
       if (e.target.closest("button")) return;
       head.closest(".mock-group").classList.toggle("expanded");
+    });
+  });
+  // query 头展开/折叠
+  mockApiList.querySelectorAll(".mock-query-head").forEach((head) => {
+    head.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      head.closest(".mock-query-item").classList.toggle("expanded");
+    });
+  });
+  // 单条记录头展开/折叠详情
+  mockApiList.querySelectorAll(".mock-api-card-head").forEach((head) => {
+    head.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      const card = head.closest(".mock-api-card");
+      const body = card.querySelector(".mock-api-card-body");
+      const toggle = head.querySelector(".mock-expand-toggle");
+      const hidden = noneOrNone(body.style.display);
+      body.style.display = hidden ? "block" : "none";
+      toggle.textContent = hidden ? "▲" : "▼";
+      card.classList.toggle("expanded", hidden);
     });
   });
   mockApiList.querySelectorAll(".mock-test-one").forEach((btn) => {
@@ -601,42 +734,36 @@ function renderMockApis(list) {
       pinMockApi(window.__mockApisBySeq[btn.getAttribute("data-seq")], btn);
     });
   });
-  // 点击卡片头部展开/折叠整个卡片内容
-  mockApiList.querySelectorAll(".mock-api-card-head").forEach((head) => {
-    head.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
-      const card = head.closest(".mock-api-card");
-      const body = card.querySelector(".mock-api-card-body");
-      const toggle = head.querySelector(".mock-expand-toggle");
-      const hidden = body.style.display === "none";
-      body.style.display = hidden ? "block" : "none";
-      toggle.textContent = hidden ? "▲" : "▼";
-      card.classList.toggle("expanded", hidden);
+  mockApiList.querySelectorAll(".mock-src-one").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const seq = Number(btn.getAttribute("data-jump-seq"));
+      if (seq) go("recording", { focusSeq: seq });
     });
   });
-  // 点击请求体摘要展开/折叠格式化请求体
   mockApiList.querySelectorAll(".mock-req-summary").forEach((el) => {
     el.addEventListener("click", (e) => {
       e.stopPropagation();
       const code = el.parentElement.querySelector(".mock-req-code");
       if (!code) return;
-      const hidden = code.style.display === "none";
+      const hidden = noneOrNone(code.style.display);
       code.style.display = hidden ? "block" : "none";
       el.classList.toggle("expanded", hidden);
     });
   });
-  // 点击返回体摘要展开/折叠格式化返回体
   mockApiList.querySelectorAll(".mock-res-summary").forEach((el) => {
     el.addEventListener("click", (e) => {
       e.stopPropagation();
       const code = el.parentElement.querySelector(".mock-res-code");
       if (!code) return;
-      const hidden = code.style.display === "none";
+      const hidden = noneOrNone(code.style.display);
       code.style.display = hidden ? "block" : "none";
       el.classList.toggle("expanded", hidden);
     });
   });
 }
+
+function noneOrNone(v) { return v === "none" || v === ""; }
 
 async function pinMockApi(api, btn) {
   if (!api) return;
@@ -672,7 +799,8 @@ async function testMockApi(api, card) {
     }
     const cls = d.ok ? (d.status < 400 ? "ok" : "err") : "err";
     pre.className = "mock-api-result " + cls;
-    pre.textContent = `状态 ${d.status} · ${d.ms}ms\n\n${pretty}`;
+    const reason = d.miss_reason ? `\n\n未命中原因：${d.miss_reason}` : "";
+    pre.textContent = `状态 ${d.status} · ${d.ms}ms${reason}\n\n${pretty}`;
   } else {
     pre.className = "mock-api-result err";
     pre.textContent = "测试失败：无响应";
@@ -938,10 +1066,6 @@ treeEl.addEventListener("click", (e) => {
 
 // ---------------- 删除单条录制 ----------------
 function deleteRequest(seq) {
-  if (mockRunning) {
-    alert("Mock 运行中，录制库已锁定；请先停止 Mock 再删除。");
-    return;
-  }
   const rec = allRequests.find((r) => r.seq === seq);
   const label = rec
     ? `${rec.method} ${rec.path || "/"}${rec.query ? "?" + rec.query : ""}`
@@ -984,6 +1108,9 @@ function renderDetail(rec) {
     `<div class="detail-head">` +
     `<div class="detail-title">${esc(rec.method)} ${hl(rec.url)} <button class="btn-mini" data-copy-url title="复制完整请求地址">📋 复制</button>` +
     `<button class="btn-mini" id="editReqBtn" title="编辑请求（URL / 请求头 / 请求体），用于造数据">✏ 编辑请求</button>` +
+    `<button class="btn-mini" id="editResBtn" title="编辑响应（状态码 / 响应头 / 响应体），用于造数据">✏ 编辑响应</button>` +
+    `<button class="btn-mini" id="gotoLibBtn" title="在请求库中查看该接口的完整文档">📚 请求库</button>` +
+    `<button class="btn-mini" id="pinMockBtn" title="把这条响应固定为 Mock 默认返回">📌 固定到 Mock</button>` +
     (hasBody ? `<button class="btn-mini" id="downloadFileBtn" title="将响应体另存为文件">⬇ 下载文件</button>` : "") +
     `<button class="btn-mini" id="delDetailBtn" title="删除该条录制记录">🗑 删除</button>` +
     `</div>` +
@@ -993,9 +1120,7 @@ function renderDetail(rec) {
     `</div>`;
   const tabs =
     `<div class="detail-tabs">` +
-    tabBtn("overview", "概览") + tabBtn("req-headers", "请求头") + tabBtn("req-body", "请求体") +
-    tabBtn("res-headers", "响应头") + tabBtn("res-body", "响应体") + tabBtn("query", "Query") +
-    tabBtn("timing", "Timing") +
+    tabBtn("overview", "概览") + tabBtn("request", "请求") + tabBtn("response", "响应") +
     `</div>`;
   const tagsPanel = `<div class="detail-tags">${tagsEditorHtml(rec)}</div>`;
   detailEl.innerHTML = head + tagsPanel + tabs + `<div class="detail-body" id="detailBody">${renderTab(rec, currentTab)}</div>`;
@@ -1018,6 +1143,17 @@ function renderDetail(rec) {
   if (editReqBtn) {
     editReqBtn.addEventListener("click", () => openEditReq(rec));
   }
+
+  const editResBtn = $("editResBtn");
+  if (editResBtn) {
+    editResBtn.addEventListener("click", () => openEditRes(rec));
+  }
+
+  const gotoLibBtn = $("gotoLibBtn");
+  if (gotoLibBtn) gotoLibBtn.addEventListener("click", () => gotoLibEndpoint(rec));
+
+  const pinMockBtn = $("pinMockBtn");
+  if (pinMockBtn) pinMockBtn.addEventListener("click", () => pinSeqToMock(rec.seq, pinMockBtn));
 
   const markSaveBtn = $("markSaveBtn");
   if (markSaveBtn) {
@@ -1101,57 +1237,160 @@ function kvTable(obj) {
 function renderTab(rec, which) {
   if (which === "overview") {
     const r = rec.response || {};
-    return (
-      `<table class="kv">` +
-      `<tr><td class="k">方法</td><td>${esc(rec.method)}</td></tr>` +
-      `<tr><td class="k">URL</td><td class="url-cell">${hl(rec.url)} <button class="btn-mini" data-copy-url title="复制请求地址">复制</button></td></tr>` +
-      `<tr><td class="k">状态</td><td>${esc(String(rec.is_failed ? "失败" : (r.status != null ? r.status : "—")))} ${esc(r.status_text || "")}</td></tr>` +
-      `<tr><td class="k">资源类型</td><td>${esc(rec.resource_type)}</td></tr>` +
-      `<tr><td class="k">MIME</td><td>${esc(r.mime_type || "—")}</td></tr>` +
-      `<tr><td class="k">大小</td><td>${fmtSize(r.size_bytes)}</td></tr>` +
-      `<tr><td class="k">耗时</td><td>${rec.duration_ms != null ? rec.duration_ms + "ms" : "—"}</td></tr>` +
-      `<tr><td class="k">主域名</td><td>${esc(rec.registered_domain)}</td></tr>` +
-      `<tr><td class="k">host</td><td>${esc(rec.host)}</td></tr>` +
-      `</table>`
-    );
+    const statusTxt = rec.is_failed ? "失败" : (r.status != null ? r.status : "—");
+    const basic = {
+      方法: rec.method || "",
+      URL: rec.url || "",
+      状态: String(statusTxt) + (r.status_text ? " " + r.status_text : ""),
+      资源类型: rec.resource_type || "",
+      MIME: r.mime_type || "—",
+      大小: fmtSize(r.size_bytes),
+      耗时: rec.duration_ms != null ? rec.duration_ms + "ms" : "—",
+      主域名: rec.registered_domain || "",
+      host: rec.host || "",
+    };
+    return dataBlock(basic, {
+      mode: "kv",
+      title: "基本信息",
+      html: {
+        URL: `${hl(rec.url)}`,
+        状态: `<span class="${statusClass(rec)}">${esc(String(statusTxt))}</span> ${esc(r.status_text || "")}`,
+      },
+    }) + renderOverviewSections(rec);
   }
-  if (which === "req-headers") return kvTable(rec.request && rec.request.headers);
-  if (which === "req-body") {
+  if (which === "request") {
     const t = rec.request && rec.request.post_data;
-    if (t == null) return `<div class="note">无请求体</div>`;
-    const raw = typeof t === "string" ? t : JSON.stringify(t, null, 2);
-    return renderJsonGutter(raw, {
-      copyRaw: raw,
+    const raw = t == null ? "" : (typeof t === "string" ? t : JSON.stringify(t, null, 2));
+    return dataBlock(raw, {
+      mode: "json",
+      title: "请求体",
+      meta: raw ? raw.split("\n").length + " 行" : "",
+      emptyText: "无请求体",
       annotations: (rec.annotations && rec.annotations.req) || {},
       annotateTarget: "req",
       seq: rec.seq,
+      actions: [{ id: "curl", label: "复制为 cURL" }],
     });
   }
-  if (which === "res-headers") return kvTable(rec.response && rec.response.headers);
-  if (which === "res-body") {
+  if (which === "response") {
     const r = rec.response || {};
     const t = r.body;
-    if (t == null) {
-      if ((r.body_size || 0) > 0) return `<div class="note">二进制响应体（大小 ${fmtSize(r.body_size)}），未捕获原文。</div>`;
-      return `<div class="note">无响应体</div>`;
-    }
-    const raw = typeof t === "string" ? t : JSON.stringify(t, null, 2);
-    return renderJsonGutter(raw, {
-      copyRaw: raw,
+    const raw = t == null ? "" : (typeof t === "string" ? t : JSON.stringify(t, null, 2));
+    const binary = t == null && (r.body_size || 0) > 0;
+    const blk = dataBlock(raw, {
+      mode: "json",
+      title: "响应体",
+      meta: raw ? raw.split("\n").length + " 行" : "",
+      emptyText: binary ? `二进制响应体（大小 ${fmtSize(r.body_size)}），未捕获原文。` : "无响应体",
       annotations: (rec.annotations && rec.annotations.res) || {},
       annotateTarget: "res",
       seq: rec.seq,
-    }) + (r.truncated ? `<div class="note">⚠ 内容已截断，完整内容见导出的 HAR / JSON。</div>` : "");
+    });
+    return blk + (r.truncated ? `<div class="note">⚠ 内容已截断，完整内容见导出的 HAR / JSON。</div>` : "");
   }
-  if (which === "query") {
-    if (!rec.query) return `<div class="note">无 Query 参数</div>`;
-    const params = new URLSearchParams(rec.query);
-    const obj = {};
-    for (const [k, v] of params.entries()) obj[k] = v;
-    return kvTable(obj);
-  }
-  if (which === "timing") return kvTable(rec.timing);
   return "";
+}
+
+function queryToObj(q) {
+  if (!q) return {};
+  const obj = {};
+  for (const [k, v] of new URLSearchParams(q).entries()) obj[k] = v;
+  return obj;
+}
+
+function countOf(obj) {
+  const n = Object.keys(obj || {}).length;
+  return n ? n + " 项" : "";
+}
+
+function recBySeq(seq) {
+  if (seq == null) return currentDetail;
+  const found = allRequests.find((r) => String(r.seq) === String(seq));
+  return found || currentDetail;
+}
+
+function reqToCurl(rec) {
+  const parts = [`curl -X ${(rec.method || "GET").toUpperCase()} '${rec.url || ""}'`];
+  const h = (rec.request && rec.request.headers) || {};
+  Object.keys(h).forEach((k) => {
+    if (/^(host|content-length|connection)$/i.test(k)) return;
+    parts.push(`  -H '${k}: ${h[k]}'`);
+  });
+  const b = rec.request && rec.request.post_data;
+  if (b != null) {
+    const body = typeof b === "string" ? b : JSON.stringify(b);
+    parts.push(`  --data-raw '${body.replace(/'/g, "'\\''")}'`);
+  }
+  return parts.join(" \\\n");
+}
+
+function handleBlockAction(id, btn) {
+  const rec = recBySeq(btn.getAttribute("data-db-seq"));
+  if (!rec) return;
+  if (id === "curl") copyText(reqToCurl(rec), btn);
+  else if (id === "json") {
+    const b = rec.response && rec.response.body;
+    copyText(typeof b === "string" ? b : JSON.stringify(b, null, 2), btn);
+  }
+}
+
+// ---------------- 接口级联动：三页围绕 method+path 互相跳转 ----------------
+function notify(msg) {
+  const toast = $("exportToast");
+  if (!toast) return;
+  toast.innerHTML =
+    `<span class="export-toast-msg">${esc(msg)}</span>` +
+    `<button class="btn btn-sm" id="exportToastClose">×</button>`;
+  toast.classList.remove("hide");
+  const close = $("exportToastClose");
+  if (close) close.addEventListener("click", () => toast.classList.add("hide"));
+  clearTimeout(window.__notifyTimer);
+  window.__notifyTimer = setTimeout(() => toast.classList.add("hide"), 2600);
+}
+
+// 录制详情 → 请求库：按 method+path 定位到该接口的完整文档
+function gotoLibEndpoint(rec) {
+  const isApi = ["XHR", "FETCH"].includes((rec.resource_type || "").toUpperCase());
+  if (!isApi) libState.filters.apiOnly = false;
+  libState.view = "detail";
+  libState.domain = rec.registered_domain || rec.host || "";
+  libState.method = (rec.method || "GET").toUpperCase();
+  libState.path = rec.path || "";
+  libState.filter = "";
+  go("library");
+  renderLibrary();
+}
+
+// 请求库 / Mock → 录制页：定位到具体某一条
+function gotoRecordingSeq(seq) {
+  go("recording");
+  setTimeout(() => openDetail(seq), 30);
+}
+
+async function pinSeqToMock(seq, btn) {
+  if (btn) btn.disabled = true;
+  const res = await postJSON("/api/mock/pin", { seq, pinned: true });
+  if (btn) btn.disabled = false;
+  if (res && res.data && res.data.ok) {
+    notify("已把该条固定为 Mock 默认返回");
+    loadMockApis();
+  } else {
+    alert("固定失败：" + ((res && res.data && res.data.error) || "未知错误"));
+  }
+}
+
+// 概览 = 全部扁平信息分区展示：基本信息 / Query / 请求头 / 响应头 / Timing
+function renderOverviewSections(rec) {
+  const r = rec.response || {};
+  const reqH = (rec.request && rec.request.headers) || {};
+  const resH = r.headers || {};
+  const q = queryToObj(rec.query);
+  return (
+    dataBlock(q, { mode: "kv", title: "Query 参数", meta: countOf(q), emptyText: "无 Query 参数" }) +
+    dataBlock(reqH, { mode: "kv", title: "请求头", meta: countOf(reqH), emptyText: "无请求头" }) +
+    dataBlock(resH, { mode: "kv", title: "响应头", meta: countOf(resH), emptyText: "无响应头" }) +
+    dataBlock(rec.timing, { mode: "kv", title: "Timing", meta: countOf(rec.timing), emptyText: "无耗时数据" })
+  );
 }
 
 // ---------------- 标记（接口级备注 + 标签，与请求库共享同一份）----------------
@@ -1228,6 +1467,63 @@ function wireEditReqModal() {
   });
 }
 
+// ---------------- 编辑响应（造数据：改状态码 / 响应头 / 响应体）----------------
+function openEditRes(rec) {
+  const modal = $("editResModal");
+  if (!modal) return;
+  const r = rec.response || {};
+  $("editResStatus").value = r.status != null ? r.status : "";
+  $("editResStatusText").value = r.status_text || "";
+  const hdr = r.headers || {};
+  $("editResHeaders").value = Object.keys(hdr).length ? JSON.stringify(hdr, null, 2) : "{}";
+  const b = r.body;
+  $("editResBody").value = b == null ? "" : (typeof b === "string" ? b : JSON.stringify(b, null, 2));
+  $("editResErr").textContent = "";
+  modal.classList.remove("hide");
+  setTimeout(() => $("editResStatus") && $("editResStatus").focus(), 50);
+}
+
+function wireEditResModal() {
+  const modal = $("editResModal");
+  if (!modal) return;
+  $("editResModalClose").addEventListener("click", () => modal.classList.add("hide"));
+  $("editResCancel").addEventListener("click", () => modal.classList.add("hide"));
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.add("hide"); });
+  $("editResSave").addEventListener("click", () => {
+    if (!currentDetail) return;
+    const errEl = $("editResErr");
+    errEl.textContent = "";
+    const statusRaw = $("editResStatus").value.trim();
+    let res_status = null;
+    if (statusRaw !== "") {
+      res_status = Number(statusRaw);
+      if (!Number.isInteger(res_status) || res_status < 100 || res_status > 599) {
+        errEl.textContent = "状态码必须是 100-599 的整数";
+        return;
+      }
+    }
+    const saveBtn = $("editResSave");
+    saveBtn.disabled = true;
+    postJSON("/api/response/edit", {
+      seq: currentDetail.seq,
+      res_status,
+      res_status_text: $("editResStatusText").value,
+      res_headers: $("editResHeaders").value,
+      res_body: $("editResBody").value,
+    })
+      .then((res) => {
+        if (res.ok && res.data && res.data.ok) {
+          modal.classList.add("hide");
+          openDetail(currentDetail.seq);  // 重新拉取，刷新概览/响应体/树
+        } else {
+          errEl.textContent = "保存失败：" + ((res.data && res.data.error) || "未知错误");
+        }
+      })
+      .catch((e) => { errEl.textContent = "保存失败：" + e; })
+      .finally(() => { saveBtn.disabled = false; });
+  });
+}
+
 // ---------------- 详情内「复制请求地址」按钮 ----------------
 // 折叠 / 复制 JSON / 字段注释 由全局委托（wireGlobalJsonInteractions）统一处理，
 // 这样不论 JSON 渲染在详情页、Mock 卡片还是 Mock 日志弹窗，交互都生效。
@@ -1280,13 +1576,15 @@ function wireGlobalJsonInteractions() {
     const fold = e.target.closest(".json-fold");
     if (fold) {
       e.stopPropagation();
-      const start = Number(fold.getAttribute("data-start"));
       const end = Number(fold.getAttribute("data-end"));
       const viewer = fold.closest(".json-viewer");
       if (!viewer) return;
+      const openLine = fold.closest(".json-line");
+      const openLineNo = openLine ? Number(openLine.getAttribute("data-line")) : 0;
       const collapsed = fold.classList.toggle("collapsed");
       fold.textContent = collapsed ? "▶" : "▼";
-      for (let i = start + 1; i < end; i++) {
+      if (openLine) openLine.classList.toggle("fold-collapsed", collapsed);
+      for (let i = openLineNo + 1; i <= end; i++) {
         const line = viewer.querySelector(`.json-line[data-line="${i}"]`);
         if (line) line.classList.toggle("fold-hidden", collapsed);
       }
@@ -1302,7 +1600,52 @@ function wireGlobalJsonInteractions() {
       if (seq && target) annotateSeq(seq, target, path);
       return;
     }
-    // 3) 复制：code-copy 按钮
+    // 3) 数据块：复制整块
+    const blkCopy = e.target.closest("[data-copy-block]");
+    if (blkCopy) {
+      e.stopPropagation();
+      const blk = blkCopy.closest(".data-block");
+      const holder = blk && blk.querySelector("[data-raw]");
+      if (holder) copyText(holder.getAttribute("data-raw"), blkCopy);
+      return;
+    }
+    // 4) 数据块：逐行复制值
+    const valCopy = e.target.closest("[data-copy-value]");
+    if (valCopy) {
+      e.stopPropagation();
+      copyText(valCopy.getAttribute("data-copy-value"), valCopy);
+      return;
+    }
+    // 5) 数据块：块级动作（复制为 cURL 等）
+    const act = e.target.closest("[data-db-act]");
+    if (act) {
+      e.stopPropagation();
+      handleBlockAction(act.getAttribute("data-db-act"), act);
+      return;
+    }
+    // 6) 联动：跳到录制页定位该条
+    const jump = e.target.closest("[data-jump-seq]");
+    if (jump) {
+      e.stopPropagation();
+      gotoRecordingSeq(Number(jump.getAttribute("data-jump-seq")));
+      return;
+    }
+    // 7) 联动：固定为 Mock 默认返回
+    const pin = e.target.closest("[data-pin-seq]");
+    if (pin) {
+      e.stopPropagation();
+      pinSeqToMock(Number(pin.getAttribute("data-pin-seq")), pin);
+      return;
+    }
+    // 7.5) 最大化：把 JSON / 键值对组件在弹窗里全尺寸展示
+    const max = e.target.closest("[data-max]");
+    if (max) {
+      e.stopPropagation();
+      const scope = max.closest(".data-block, .code-wrap, .mock-card-section, .mock-log-sec");
+      if (scope) openJsonMax(scope);
+      return;
+    }
+    // 8) 复制：code-copy 按钮
     const copy = e.target.closest("[data-copy]");
     if (copy) {
       e.stopPropagation();
@@ -1320,6 +1663,52 @@ function wireGlobalJsonInteractions() {
       }
       return;
     }
+  });
+}
+
+// ---------------- JSON / 键值对 最大化查看 ----------------
+// 直接克隆源 viewer（.json-viewer / .kv-viewer）进弹窗，全尺寸展示：
+// 折叠 / 复制 / 字段注释等交互由全局委托（wireGlobalJsonInteractions）自动生效，
+// 无需为弹窗重新绑定；bare viewer（无 code-wrap）的复制由弹窗「复制」按钮提供。
+function openJsonMax(scopeEl) {
+  if (!scopeEl) return;
+  const viewer = scopeEl.querySelector(".json-viewer, .kv-viewer");
+  if (!viewer) return;
+  const clone = viewer.cloneNode(true);
+  const body = $("jsonMaxBody");
+  if (!body) return;
+  body.innerHTML = "";
+  body.appendChild(clone);
+  const title = $("jsonMaxTitle");
+  if (title) {
+    const t = scopeEl.querySelector(".db-title, .mock-card-section-title, .mock-log-sub");
+    title.textContent = t ? t.textContent.trim() : "最大化查看";
+  }
+  const modal = $("jsonMaxModal");
+  if (modal) modal.classList.remove("hide");
+}
+
+function closeJsonMax() {
+  const modal = $("jsonMaxModal");
+  if (modal) modal.classList.add("hide");
+  const body = $("jsonMaxBody");
+  if (body) body.innerHTML = "";
+}
+
+function wireJsonMaxModal() {
+  const modal = $("jsonMaxModal");
+  if (!modal) return;
+  const close = $("jsonMaxClose");
+  if (close) close.addEventListener("click", closeJsonMax);
+  const copy = $("jsonMaxCopy");
+  if (copy) copy.addEventListener("click", () => {
+    const v = $("jsonMaxBody");
+    const holder = v && v.querySelector("[data-raw]");
+    if (holder) copyText(holder.getAttribute("data-raw") || "", copy);
+  });
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeJsonMax(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.classList.contains("hide")) closeJsonMax();
   });
 }
 
@@ -1466,7 +1855,9 @@ const exportBtn = $("exportBtn");
 if (exportBtn) exportBtn.addEventListener("click", () => go("export"));
 
 wireEditReqModal();
+wireEditResModal();
 wireGlobalJsonInteractions();
+wireJsonMaxModal();
 
 const importBtn = $("importBtn");
 const importFile = $("importFile");
@@ -1546,7 +1937,7 @@ fetch("/api/mock/status")
   .then(updateMockUI)
   .catch(() => {});
 
-// 同样拉一次录制状态：刷新页面时若正在录制，按钮状态/互斥锁能立即正确反映
+// 同样拉一次录制状态：刷新页面时若正在录制，按钮状态能立即正确反映
 fetch("/api/status")
   .then((r) => r.json())
   .then(updateStatus)
@@ -2036,17 +2427,19 @@ function renderLibDetail(pad) {
       if (!r) { td.innerHTML = ""; det.style.display = ""; return; }
       const tabs = [
         { key: "overview", label: "概览" },
-        { key: "req-headers", label: "请求头" },
-        { key: "req-body", label: "请求体" },
-        { key: "res-headers", label: "响应头" },
-        { key: "res-body", label: "响应体" },
-        { key: "query", label: "Query" },
+        { key: "request", label: "请求" },
+        { key: "response", label: "响应" },
       ];
       let active = "overview";
       const render = () => {
         const tabBar = `<div class="detail-tabs" id="cdtabs-${seq}">${tabs.map((t) => tabBtn(t.key, t.label, active)).join("")}</div>`;
+        const jumpBar =
+          `<div class="cd-jump">` +
+          `<button class="btn-mini" data-jump-seq="${r.seq}" title="跳到录制页定位这条">↗ 在录制中定位</button>` +
+          `<button class="btn-mini" data-pin-seq="${r.seq}" title="把这条固定为 Mock 默认返回">📌 固定为 Mock 返回</button>` +
+          `</div>`;
         const body = `<div class="detail-body" id="cdbody-${seq}">${renderTab(r, active)}</div>`;
-        td.innerHTML = `<div class="case-detail-inner">${tabBar}${body}</div>`;
+        td.innerHTML = `<div class="case-detail-inner">${jumpBar}${tabBar}${body}</div>`;
         td.querySelectorAll(".tab").forEach((el) => el.addEventListener("click", () => {
           active = el.getAttribute("data-tab");
           render();

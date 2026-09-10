@@ -268,6 +268,10 @@ class CaptureStore:
         self._schedule_persist()
         return True
 
+    def notify_changed(self):
+        """外部就地修改了记录（编辑请求/响应）后调用：标脏并防抖落盘。"""
+        self._schedule_persist()
+
     def mark_stopped(self):
         with self._lock:
             self.ended_at = time.time()

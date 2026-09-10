@@ -120,6 +120,7 @@ def _make_app(manager):
                 request.method, "/" + path,
                 request.query_string.decode("utf-8", "replace"), req_body)
         else:
+            manager._bump_hit(m.get("seq"))
             resp = m.get("response") or {}
             body = resp.get("body") or ""
             if not isinstance(body, str):
@@ -161,6 +162,7 @@ class MockManager:
         self.port = None
         self.data = []
         self.logs = []  # 处理记录（最新追加，logs_list 倒序返回）
+        self._hits = {}  # 运行期命中计数：seq -> 次数（start/stop 时清零）
         self.started_at = None
 
     def log_request(self, entry):
@@ -169,6 +171,18 @@ class MockManager:
             self.logs.append(entry)
             if len(self.logs) > MAX_MOCK_LOGS:
                 self.logs = self.logs[-MAX_MOCK_LOGS:]
+
+    def _bump_hit(self, seq):
+        """记录一次命中（某条记录被返回给调用方）。"""
+        if seq is None:
+            return
+        with self._lock:
+            self._hits[seq] = self._hits.get(seq, 0) + 1
+
+    def hit_of(self, seq):
+        """取某条记录本运行期的命中次数。"""
+        with self._lock:
+            return self._hits.get(seq, 0)
 
     def miss_reason(self, method, path, query_str, req_body):
         """未命中时定位卡在哪个环节：method+path 无匹配 -> query 不匹配 -> 请求体不匹配。"""
@@ -252,6 +266,7 @@ class MockManager:
             self.port = srv.server_address[1]
             self.data = data
             self.logs = []
+            self._hits = {}
             self.started_at = time.time()
             return {"ok": True, "url": self._url(), "port": self.port, "count": len(data)}
 
@@ -272,6 +287,7 @@ class MockManager:
             self.port = None
             self.data = []
             self.logs = []
+            self._hits = {}
             self.started_at = None
             return {"ok": True, "running": False}
 
@@ -290,16 +306,30 @@ class MockManager:
     def match(self, method, path, query_str, req_body=None, strict=True):
         """按 (method, path, query, 请求体) 匹配一条录制记录，返回该记录或 None。
 
-        strict=True（默认）：仅 method+path+query+请求体 精确匹配，未命中返回 None。
-        strict=False（模糊）：按优先级回退：
-          1) 固定(pin) 且 method+path+query+请求体 精确 —— 最高优先
-          2) 固定(pin) 且 method+path+query 精确 —— 现有兜底语义
-          3) 非固定 method+path+query+请求体 精确
-          4) 非固定 method+path+query 精确
-          5) 回退 method+path
+        默认(pin) 命中分两级，所有模式下都最高优先：
+          1) 同 method+path+query 的默认 → 返回（query 精确优先，多 query 各锁各的）
+          2) 同 method+path 下「唯一一条」默认 → 无视 query/body 返回
+             （动态 query 接口如 ?t=时间戳：设了默认就整接口固定返回该条）
+          若同 path 存在多条不同 query 的默认则不做 2)，仅各自 query 精确命中。
+        之后按模式回退：
+          strict=True（默认）：仅 method+path+query+请求体 精确匹配，未命中返回 None。
+          strict=False（模糊）：
+            1) method+path+query+请求体 精确
+            2) method+path+query 精确
+            3) 回退 method+path
         """
         data = _get_store().get_mock_data()
         path = _norm(path)
+
+        pins = [r for r in data
+                if r.get("mock_pin") and r.get("method") == method
+                and _norm(r.get("path", "") or "") == path]
+        if pins:
+            for r in pins:
+                if (r.get("query") or "") == query_str:
+                    return r
+            if len(pins) == 1:
+                return pins[0]
 
         if strict:
             # 严格模式：仅 method+path+query+req_body 精确匹配，任何未命中一律返回 None
@@ -311,31 +341,18 @@ class MockManager:
                     return r
             return None  # 未命中即不回退
 
-        # 1) pin + 请求体精确
-        for r in data:
-            if (r.get("mock_pin") and r.get("method") == method
-                    and _norm(r.get("path", "")) == path
-                    and (r.get("query") or "") == query_str
-                    and _body_equal(r.get("req_body"), req_body)):
-                return r
-        # 2) pin + 仅 query（现有兜底：固定后该 query 一律返回此条，忽略请求体）
-        for r in data:
-            if (r.get("mock_pin") and r.get("method") == method
-                    and _norm(r.get("path", "")) == path
-                    and (r.get("query") or "") == query_str):
-                return r
-        # 3) 非 pin + 请求体精确（同 query 多条、请求体不同时各自返回自己的）
+        # 模糊 1) 请求体精确（同 query 多条、请求体不同时各自返回自己的）
         for r in data:
             if (r.get("method") == method and _norm(r.get("path", "")) == path
                     and (r.get("query") or "") == query_str
                     and _body_equal(r.get("req_body"), req_body)):
                 return r
-        # 4) 非 pin + 仅 query
+        # 模糊 2) 仅 query
         for r in data:
             if (r.get("method") == method and _norm(r.get("path", "")) == path
                     and (r.get("query") or "") == query_str):
                 return r
-        # 5) 回退 method+path
+        # 模糊 3) 回退 method+path
         for r in data:
             if r.get("method") == method and _norm(r.get("path", "")) == path:
                 return r
@@ -351,6 +368,7 @@ class MockManager:
                 "seq": r.get("seq"),
                 "mock_pin": bool(r.get("mock_pin")),
                 "status": (r.get("response") or {}).get("status", 200),
+                "hits": self._hits.get(r.get("seq"), 0),
                 "note": r.get("note") or "",
                 "tags": r.get("tags") or [],
                 "body_preview": _body_preview((r.get("response") or {}).get("body"), 160),

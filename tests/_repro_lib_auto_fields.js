@@ -171,11 +171,11 @@ function run() {
     assert("案例详情包含详情体", detailRow.querySelector(".detail-body") !== null);
     assert("默认显示概览 tab 内容", detailRow.textContent.includes("URL"));
 
-    // 切换响应体 tab
-    const resBodyTab = Array.from(detailRow.querySelectorAll(".tab")).find((el) => el.textContent.trim() === "响应体");
-    assert("响应体 tab 存在", !!resBodyTab);
+    // 切换响应 tab（Tab 已精简：概览 / 请求 / 响应）
+    const resBodyTab = Array.from(detailRow.querySelectorAll(".tab")).find((el) => el.textContent.trim() === "响应");
+    assert("响应 tab 存在", !!resBodyTab);
     resBodyTab.click();
-    assert("响应体 tab 切出 JSON 渲染内容", detailRow.textContent.includes("Alice"), detailRow.textContent.slice(0, 300));
+    assert("响应 tab 切出 JSON 渲染内容", detailRow.textContent.includes("Alice"), detailRow.textContent.slice(0, 300));
 
     // 保存应发 /api/endpoint/doc 且包含推断的 req/resp
     window.document.getElementById("epSave").click();

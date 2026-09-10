@@ -265,3 +265,72 @@
 - **行为**：导入前旧库保留；与旧库重复的条目跳过并计入「去重 N 条」；导入完成提示「共 N 条」= 本次新增条数。
 - **测试**：`test_import_dedup.py` 扩至 14 断言（新增用例 8：旧库保留 + 旧库重复去重 + 新条追加，走 `_import_files` 真实路径）。
 - **验证**：后端 8 测试 + 前端 9 jsdom 全绿。**代码未提交，待 review。**
+
+## 2026-09-02 UX 三大痛点改造（统一数据块 + 全量复制 + 三页联动）
+
+用户反馈：「很多地方是 JSON 区域，展示又不统一；复制功能没了；功能跟功能之间没有联动」。
+
+### 取证结论（jsdom 实测，非静态读码）
+1. **展示割裂**：同一详情页并存 4 套形态——body 走 `renderJsonGutter`（行号/折叠/注释/复制），headers/query/timing 走 `kvTable`（朴素两列表、无复制），请求库字段走 `field-table`，导出预览走 `<pre class="code">`。
+2. **复制"没了"**：实测 7 个 Tab，只有请求体/响应体有复制按钮。**请求头、响应头、Query、Timing 一个都没有** —— 而 token / Cookie / Set-Cookie 全在 header 里；项目自身注释即写明「WebView2 下选中文本 Ctrl+C 不稳定」，header 无按钮 = 实际复制不了。另 `codeBlock()`（125 行）是**零调用点的死代码**，当年被 `renderJsonGutter` 取代时漏了 header。
+3. **无联动**：全库跨页跳转仅 1 处（请求库面包屑返回）。录制详情按钮全是本条记录内操作，三页共用同一份 `endpoint_docs(method,path)` 却是孤岛。
+
+### 改造（三层，纯前端渲染层，未动后端）
+- **统一数据块组件** `dataBlock(payload, opts)`：JSON 与键值对**同构**。mode=json 复用 `renderJsonGutter` 内核（新增 `hideCopyBtn`，让复制按钮上移到统一标题栏）；mode=kv 新增 `renderKvViewer`（行号 gutter + 逐行「复制该值」）。支持 `opts.html` 按 key 自定义值渲染，状态色得以保留。
+- **Tab 精简 7 → 3**：概览（基本信息 / Query / 请求头 / 响应头 / Timing 五个数据块）/ 请求（请求体 + 复制为 cURL）/ 响应（响应体）。请求库案例展开同步精简。
+- **复制内核统一**：删死代码 `codeBlock`；新增块级复制（`data-copy-block`）、逐行复制（`data-copy-value`）、块级动作（`data-db-act`，首期 cURL）；全部并入 `wireGlobalJsonInteractions` 全局委托，任何容器都生效。
+- **接口级联动**（以 `method+path` 为中心，由我设计并落地）：
+
+  | 起点 | 动作 | 终点 |
+  |---|---|---|
+  | 录制详情 | 📚 请求库 | 请求库，定位到该接口文档 |
+  | 录制详情 | 📌 固定到 Mock | `/api/mock/pin` 固定该响应 |
+  | 请求库案例 | ↗ 在录制中定位 | 录制页定位该条 |
+  | 请求库案例 | 📌 固定为 Mock 返回 | 同上 |
+  | Mock 接口卡 | 来源 | 录制页查看原始记录 |
+
+- **新增** `notify()` 轻量提示（复用 `#exportToast`）、`reqToCurl()` 生成 cURL、`queryToObj()` / `countOf()` / `recBySeq()` 辅助。
+
+### 验证
+- 新增 `tests/_repro_ux_fix.js` **22 断言全绿**：Tab 数=3、概览 5 个数据块且各有复制全文与逐行复制、Authorization / Set-Cookie 值可单独复制、概览零 `kvTable`、请求体 cURL 正确（含方法与 body）、四条联动链路均打通、无 JS 报错。
+- 回归：`_repro_lib_auto_fields.js` 39 断言（同步把旧 tab key「响应体」更新为「响应」）、其余 8 个 jsdom 脚本全绿。
+- **视觉预览**：`design/build-detail-preview.js` → `design/detail-preview.html`（真实 CSS + 真实渲染代码产出，可在浏览器直接看改造效果并试复制/折叠）。
+
+---
+
+# 2026-09-02 追加 · 录制侧「编辑响应体」+ 文档纠错
+
+## 纠错（与代码事实矛盾，勿再引用旧结论）
+- 顶部「用户拍板 #2」称**已删除 4 处互斥守卫、运行期放开录制与编辑**——**git 与代码实测不符**：`app/server.py` 自 570b98c(08-13) 起互斥从未删过，现仍在：Mock 运行中 `api_start` / `api_request_delete` / `api_request_edit` / `api_response/edit` 返回 400「录制库已锁定」；录制运行中 `api_mock_start` 返回 400。
+- **属实的一半**：`mock_manager` 的 `match()/start()/apis()` 实时读 `get_mock_data()`（固定/导入即时影响运行中 Mock）；`api_clear` 与导入**无**守卫；前端 `applyLocks()` 不锁业务按钮。endpoint_docs 统一模型亦属实。
+
+## 新功能：编辑响应体（对称于「编辑请求」）
+- **后端** `POST /api/response/edit`（`app/server.py`）：`seq` + 可选 `res_status`(100-599，''/null 清空) / `res_status_text` / `res_headers`(JSON 文本，''/{} 清空) / `res_body`(str，空/null 清空)；校验全部通过后一次落字段。派生字段自动重算：`body_size`/`size_bytes`、pop `truncated`；headers 变更重算 `mime_type`（`_infer_mime`）；状态码变更时旧码标准 `status_text`（http.client.responses）自动换新码短语。Mock 运行中 400。
+- **缺陷修复**：`/api/request/edit` 就地改内存但从不标脏 → 编辑重启丢失。新增 `CaptureStore.notify_changed()`（防抖落盘），两个编辑端点保存后均调用。
+- **前端**：详情头部新增「✏ 编辑响应」+ `#editResModal`（状态码/文本一行 + 响应头/响应体 textarea）；`openEditRes`/`wireEditResModal`，保存后 `openDetail` 刷新。预览页（design/detail-preview.html）嵌入两个弹窗可点开。
+
+## 验证（全绿）
+- `tests/test_response_edit.py`：参数校验（含**校验失败零副作用**）、完整编辑、派生口径（Mock 数据源/HAR/JSON 一致）、旧码 status_text 自动替换（显式与前端总是携带两种路径）、自定义文本保留、清空 body（''/null）、mime 跟随头、Mock 锁 400。
+- `tests/_repro_res_edit.js`：18 断言（按钮并存→弹窗预填→保存请求载荷→详情刷新 403→无旧 token→无 JS 错）。
+- 全量回归：后端 9 个 test_*.py + 前端 11 个 _repro_*.js 全部通过。
+
+---
+
+# 2026-09-02 追加 · 移除 Mock 状态作为编辑开关（全部放开）
+
+按用户要求「mock 开启也可以编辑，全部改一遍」：Mock 运行状态不再充当任何编辑/互斥开关，Mock 实时读库模型下录制、编辑、删除、Mock 可并存，改动即时作用于运行中 Mock。
+
+## `app/server.py`（删除全部 5 处互斥守卫）
+- `api_start`：删「Mock 运行中拒绝开始录制」。
+- `api_request_delete`：删「Mock 运行中拒绝删除」。
+- `api_request_edit` / `api_response_edit`：删「Mock 运行中录制库已锁定」400，docstring 改为「编辑写回实时库：运行中的 Mock 下次匹配即用新值」。
+- `api_mock_start`：删「录制运行中拒绝启动 Mock」。
+- 顺带修正：`api_request_delete` 三处返回由裸 `json.dumps`（text/html）统一为 `_json_err` / `Response(mimetype="application/json")`，与其它端点一致（测试 `get_json()` 暴露）。
+
+## `static/app.js` / `static/index.html`
+- `deleteRequest` 删 `mockRunning` 早退 alert；`applyLocks()` 标题注释由「互斥/冻结控制」改「运行状态显示」（只刷新 stop/stopMock 与状态点，本就不锁业务按钮）。
+- 两个编辑弹窗 hint 由「Mock 运行中不可编辑」改为「Mock 运行中改完也立即生效」。
+
+## 验证（全绿）
+- `tests/test_response_edit.py` 末块改断言：Mock 运行中 `response/edit`、`request/edit` 均成功且 `get_mock_data()` 立即反映新值；`request/delete` 成功且从 Mock 数据源消失。
+- 全量回归：后端 9 个 test_*.py + 前端 11 个 _repro_*.js 全部通过。

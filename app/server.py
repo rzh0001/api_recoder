@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Flask 服务：静态页面、REST 控制接口、WebSocket 实时推流。"""
 import base64
+import http.client
 import json
 import mimetypes
 import os
@@ -73,12 +74,6 @@ def api_start():
     local_path = data.get("local_path") or None
     browser = data.get("browser") or None
     start_url = data.get("start_url") or "about:blank"
-    # 互斥守卫：Mock 运行中不允许再开始录制（快照模型下两者不能共存）
-    if state.mock_manager.running:
-        return json.dumps(
-            {"ok": False, "error": "请先停止 Mock 服务，再开始录制（录制与 Mock 不能同时进行）"},
-            ensure_ascii=False,
-        ), 400
     try:
         info = state.browser_manager.launch(
             mode=mode, local_path=local_path, start_url=start_url, browser=browser
@@ -115,17 +110,11 @@ def api_request_delete():
     data = request.get_json(silent=True) or {}
     seq = data.get("seq")
     if not isinstance(seq, int) or seq <= 0:
-        return json.dumps({"ok": False, "error": "缺少有效的 seq"}, ensure_ascii=False), 400
-    # 互斥守卫：Mock 运行中录制库已冻结（快照模型），与导入/清空保持一致
-    if state.mock_manager.running:
-        return json.dumps(
-            {"ok": False, "error": "Mock 运行中，录制库已锁定；请先停止 Mock 再删除"},
-            ensure_ascii=False,
-        ), 400
+        return _json_err("缺少有效的 seq", 400)
     if not state.store.remove(seq):
-        return json.dumps({"ok": False, "error": "记录不存在或已删除"}, ensure_ascii=False), 404
+        return _json_err("记录不存在或已删除", 404)
     _broadcast_snapshot()
-    return json.dumps({"ok": True}, ensure_ascii=False)
+    return Response(json.dumps({"ok": True}, ensure_ascii=False), mimetype="application/json")
 
 
 def _broadcast_snapshot():
@@ -199,13 +188,11 @@ def api_request_edit():
     """编辑请求数据（造数据用）：修改 URL / 请求头 / 请求体。
     请求体：{"seq":N, "url"?:str, "req_headers"?:str(JSON 文本), "req_body"?:str}
     修改 URL 时自动重算 scheme/host/registered_domain/path/query，保持左侧树分组与导出一致。
-    与删除/导入一致，Mock 运行中冻结录制库，拒绝编辑。"""
+    编辑写回实时库：运行中的 Mock 下次匹配即用新值，导出 HAR/JSON 同样基于新值。"""
     data = request.get_json(silent=True) or {}
     seq = data.get("seq")
     if not isinstance(seq, int) or seq <= 0:
         return _json_err("缺少有效的 seq", 400)
-    if state.mock_manager.running:
-        return _json_err("Mock 运行中，录制库已锁定；请先停止 Mock 再编辑", 400)
     rec = state.store.get(seq)
     if rec is None:
         return _json_err("记录不存在或已删除", 404)
@@ -239,6 +226,101 @@ def api_request_edit():
     if body_raw is not None:
         rec.setdefault("request", {})["post_data"] = str(body_raw)
 
+    state.store.notify_changed()
+    _broadcast_snapshot()
+    return Response(json.dumps({"ok": True}, ensure_ascii=False), mimetype="application/json")
+
+
+@app.post("/api/response/edit")
+def api_response_edit():
+    """编辑响应数据（造数据用）：改状态码 / 状态文本 / 响应头 / 响应体。
+    请求体：{"seq":N, "res_status"?:int(100-599，''/null 表示无状态), "res_status_text"?:str,
+             "res_headers"?:str(JSON 对象文本，''/'{}' 表示清空), "res_body"?:str|null(清空)}
+    修改后同步重算 body_size / size_bytes / mime_type 等派生字段，与「导出 HAR/JSON、
+    下载文件、Mock 匹配」口径一致；状态码变更时若状态文本仍是旧码的标准短语则自动替换。
+    编辑写回实时库：运行中的 Mock 下次匹配即用新值，导出 HAR/JSON 同样基于新值。"""
+    data = request.get_json(silent=True) or {}
+    seq = data.get("seq")
+    if not isinstance(seq, int) or seq <= 0:
+        return _json_err("缺少有效的 seq", 400)
+    rec = state.store.get(seq)
+    if rec is None:
+        return _json_err("记录不存在或已删除", 404)
+    resp = rec.get("response")
+    if not isinstance(resp, dict):
+        resp = rec["response"] = {}
+
+    # 全通过后再落字段
+    new_status = None
+    has_status = "res_status" in data
+    if has_status:
+        s = data.get("res_status")
+        if isinstance(s, str):
+            s = s.strip()
+        if s not in (None, ""):
+            try:
+                new_status = int(s)
+            except (TypeError, ValueError):
+                return _json_err("状态码必须是 100-599 的整数", 400)
+            if not (100 <= new_status <= 599):
+                return _json_err("状态码必须在 100-599 之间", 400)
+
+    new_headers = None
+    has_headers = "res_headers" in data
+    if has_headers:
+        raw = data.get("res_headers")
+        txt = str(raw).strip() if raw is not None else ""
+        try:
+            obj = json.loads(txt) if txt else {}
+        except Exception as e:
+            return _json_err(f"响应头不是合法 JSON：{e}", 400)
+        if not isinstance(obj, dict):
+            return _json_err("响应头必须是 JSON 对象", 400)
+        new_headers = {str(k): str(v) for k, v in obj.items()}
+
+    new_body = None
+    has_body = "res_body" in data
+    if has_body:
+        b = data.get("res_body")
+        if b is None:
+            new_body = None
+        elif isinstance(b, str):
+            new_body = b if b.strip() else None
+        else:
+            return _json_err("响应体必须是字符串或 null", 400)
+
+    old_status = resp.get("status")
+    if has_status:
+        resp["status"] = new_status
+    old_txt = (resp.get("status_text") or "").strip()
+    std_old = http.client.responses.get(old_status, "") if isinstance(old_status, int) else ""
+    std_new = http.client.responses.get(new_status, "") if isinstance(new_status, int) else ""
+    if "res_status_text" in data:
+        t = data.get("res_status_text")
+        t = t.strip() if isinstance(t, str) else ""
+        if std_old and t == std_old and std_new:
+            t = std_new
+        resp["status_text"] = t
+    elif has_status and new_status is not None and new_status != old_status:
+        if not old_txt or (std_old and old_txt == std_old):
+            resp["status_text"] = std_new
+
+    if has_headers:
+        resp["headers"] = new_headers
+        resp["mime_type"] = _infer_mime(rec, resp)
+
+    if has_body:
+        resp["body"] = new_body
+        resp.pop("truncated", None)
+        if new_body is None:
+            resp["body_size"] = 0
+            resp["size_bytes"] = 0
+        else:
+            n = len(new_body.encode("utf-8", "replace"))
+            resp["body_size"] = n
+            resp["size_bytes"] = n
+
+    state.store.notify_changed()
     _broadcast_snapshot()
     return Response(json.dumps({"ok": True}, ensure_ascii=False), mimetype="application/json")
 
@@ -614,15 +696,6 @@ def api_export_mock_save():
 @app.post("/api/mock/start")
 def api_mock_start():
     data = request.get_json(silent=True) or {}
-    # 互斥守卫：正在录制时不允许启动 Mock（快照模型下两者不能共存）
-    if state.browser_manager._running:
-        return Response(
-            json.dumps(
-                {"ok": False, "error": "请先停止录制，再启动 Mock（录制与 Mock 不能同时进行）"},
-                ensure_ascii=False,
-            ),
-            status=400, mimetype="application/json",
-        )
     port = data.get("port")
     if port is not None:
         try:
@@ -696,8 +769,12 @@ def api_mock_logs():
 def api_mock_test():
     """快速测试某条 mock 接口：由主服务代理请求到 mock 端口，避开跨域(CORS)。
 
-    请求体：{"method": "GET", "path": "/v1/x", "query": "a=1"}
-    返回：{"ok": true, "status": 200, "ms": 12, "body": "..."} 或错误。
+    入参两种：
+      {"seq": 12}  推荐 —— 取该录制记录自身的 method/path/query/请求体 去测
+                   （验证"这条记录现在能否被 Mock 命中/返回什么"）。
+      {"method": "GET", "path": "/v1/x", "query": "a=1", "req_body"?: str} 手动指定。
+    返回：{"ok": true, "status": 200, "ms": 12, "body": "...", "miss_reason": ""}；
+    未命中(404)时附 miss_reason 说明卡在哪一环。
     """
     m = state.mock_manager
     if not m.running:
@@ -706,37 +783,64 @@ def api_mock_test():
             status=400, mimetype="application/json",
         )
     data = request.get_json(silent=True) or {}
-    method = (data.get("method") or "GET").upper()
-    path = data.get("path") or "/"
-    query = data.get("query") or ""
+    seq = data.get("seq")
+    if seq is not None:
+        if not isinstance(seq, int):
+            return _json_err("seq 无效", 400)
+        rec = state.store.get(seq)
+        if rec is None:
+            return _json_err("记录不存在或已删除", 404)
+        method = (rec.get("method") or "GET").upper()
+        path = rec.get("path") or "/"
+        query = rec.get("query") or ""
+        req_body = (rec.get("request") or {}).get("post_data")
+    else:
+        method = (data.get("method") or "GET").upper()
+        path = data.get("path") or "/"
+        query = data.get("query") or ""
+        req_body = data.get("req_body")
     base = (m._url() or "").rstrip("/")
     url = base + path
     if query:
         url += "?" + query
     t0 = _time.time()
     try:
-        req = urllib.request.Request(url, method=method)
+        if req_body is not None and method not in ("GET", "HEAD"):
+            req = urllib.request.Request(
+                url,
+                data=str(req_body).encode("utf-8", "replace"),
+                headers={"Content-Type": "application/json; charset=utf-8"},
+                method=method,
+            )
+        else:
+            req = urllib.request.Request(url, method=method)
         with urllib.request.urlopen(req, timeout=5) as resp:
             body = resp.read().decode("utf-8", "replace")
             code = resp.getcode()
         ms = int((_time.time() - t0) * 1000)
         return Response(
             json.dumps(
-                {"ok": True, "status": code, "ms": ms, "body": body[:3000]},
+                {"ok": True, "status": code, "ms": ms, "body": body[:3000], "miss_reason": ""},
                 ensure_ascii=False,
             ),
             mimetype="application/json",
         )
     except urllib.error.HTTPError as e:
-        # 404 等也是"正常响应"，如实返回状态码
+        # 404 等也是"正常响应"，如实返回状态码；未命中时附 miss_reason 定位原因
         try:
             body = e.read().decode("utf-8", "replace")
         except Exception:
             body = ""
         ms = int((_time.time() - t0) * 1000)
+        reason = ""
+        if e.code == 404:
+            try:
+                reason = m.miss_reason(method, path, query, req_body) or ""
+            except Exception:
+                reason = ""
         return Response(
             json.dumps(
-                {"ok": True, "status": e.code, "ms": ms, "body": body[:3000]},
+                {"ok": True, "status": e.code, "ms": ms, "body": body[:3000], "miss_reason": reason},
                 ensure_ascii=False,
             ),
             mimetype="application/json",

@@ -1,3 +1,9 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>录制详情 · 统一数据块预览</title>
+<style>
 :root {
   /* ---- 浅色 + 青绿（Teal）设计系统 ---- */
   --bg: #f3f7f6;
@@ -1316,3 +1322,228 @@ body { display: block; }
 .kv-val { display: table-cell; padding: 2px 8px; color: var(--text); word-break: break-all; vertical-align: top; }
 .kv-copy { display: table-cell; width: 1px; white-space: nowrap; opacity: 0; transition: opacity .1s ease; margin-left: 6px; }
 .kv-line:hover .kv-copy { opacity: 1; }
+
+body { background: var(--bg); margin: 0; padding: 24px; }
+.preview-wrap { max-width: 900px; margin: 0 auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--sh-2); }
+.preview-note { max-width: 900px; margin: 0 auto 14px; color: var(--text-2); font-size: 13px; line-height: 1.7; }
+.preview-note b { color: var(--text); }
+.pv-tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.pv-tab { padding: 6px 14px; font-size: 13px; cursor: pointer; border-radius: var(--r-sm) var(--r-sm) 0 0; color: var(--text-2); }
+.pv-tab.active { background: var(--surface); color: var(--accent-strong); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.pv-pane { display: none; padding: 10px 12px; }
+.pv-pane.active { display: block; }
+.kv-copy, .db-head .btn-mini { pointer-events: auto; }
+</style>
+</head>
+<body>
+<div class="preview-note">
+  <b>录制详情 · 统一数据块</b> —— 概览 / 请求 / 响应 三个 Tab。所有结构化数据（基本信息 / Query / 请求头 / 响应头 / Timing / 请求体 / 响应体）
+  共用同一个「数据块」外壳：标题栏 + 复制全文 + 行号 + 逐行复制值。把鼠标移到任意一行，右侧会出现「复制」。
+  点头部 <b>✏ 编辑请求 / ✏ 编辑响应</b> 可查看两个造数据弹窗（仅视觉预览，保存不落库）。
+</div>
+<div class="preview-wrap">
+  <div class="detail-head"><div class="detail-title">POST https://api.example.com/v1/login?from=web&amp;t=1 <button class="btn-mini" data-copy-url="" title="复制完整请求地址">📋 复制</button><button class="btn-mini" id="editReqBtn" title="编辑请求（URL / 请求头 / 请求体），用于造数据">✏ 编辑请求</button><button class="btn-mini" id="editResBtn" title="编辑响应（状态码 / 响应头 / 响应体），用于造数据">✏ 编辑响应</button><button class="btn-mini" id="gotoLibBtn" title="在请求库中查看该接口的完整文档">📚 请求库</button><button class="btn-mini" id="pinMockBtn" title="把这条响应固定为 Mock 默认返回">📌 固定到 Mock</button><button class="btn-mini" id="downloadFileBtn" title="将响应体另存为文件">⬇ 下载文件</button><button class="btn-mini" id="delDetailBtn" title="删除该条录制记录">🗑 删除</button></div><div class="detail-meta">状态 <span class="s-2">200</span> · 类型 XHR · 大小 256 B · 耗时 123ms<br>域 example.com · host api.example.com</div></div>
+  <div class="pv-tabs">
+    <div class="pv-tab active" data-pane="overview">概览</div>
+    <div class="pv-tab" data-pane="request">请求</div>
+    <div class="pv-tab" data-pane="response">响应</div>
+  </div>
+  <div class="pv-pane active" id="pane-overview"><div class="data-block db-kv"><div class="db-head"><span class="db-title">基本信息</span><span class="db-meta"></span><span class="db-spacer"></span><button class="btn-mini db-copy" data-copy-block="">复制</button><button class="btn-mini db-max" data-max="" title="最大化查看">⛶</button></div><div class="db-body"><div class="kv-viewer" data-raw="{
+  &quot;方法&quot;: &quot;POST&quot;,
+  &quot;URL&quot;: &quot;https://api.example.com/v1/login?from=web&amp;t=1&quot;,
+  &quot;状态&quot;: &quot;200 OK&quot;,
+  &quot;资源类型&quot;: &quot;XHR&quot;,
+  &quot;MIME&quot;: &quot;application/json&quot;,
+  &quot;大小&quot;: &quot;256 B&quot;,
+  &quot;耗时&quot;: &quot;123ms&quot;,
+  &quot;主域名&quot;: &quot;example.com&quot;,
+  &quot;host&quot;: &quot;api.example.com&quot;
+}"><div class="kv-line" data-line="1"><span class="kv-gutter"><span class="kv-lineno">1</span></span><span class="kv-key" title="方法">方法</span><span class="kv-sep">:</span><span class="kv-val">POST</span><button class="btn-mini kv-copy" data-copy-value="POST" title="复制该值">复制</button></div><div class="kv-line" data-line="2"><span class="kv-gutter"><span class="kv-lineno">2</span></span><span class="kv-key" title="URL">URL</span><span class="kv-sep">:</span><span class="kv-val">https://api.example.com/v1/login?from=web&amp;t=1</span><button class="btn-mini kv-copy" data-copy-value="https://api.example.com/v1/login?from=web&amp;t=1" title="复制该值">复制</button></div><div class="kv-line" data-line="3"><span class="kv-gutter"><span class="kv-lineno">3</span></span><span class="kv-key" title="状态">状态</span><span class="kv-sep">:</span><span class="kv-val"><span class="s-2">200</span> OK</span><button class="btn-mini kv-copy" data-copy-value="200 OK" title="复制该值">复制</button></div><div class="kv-line" data-line="4"><span class="kv-gutter"><span class="kv-lineno">4</span></span><span class="kv-key" title="资源类型">资源类型</span><span class="kv-sep">:</span><span class="kv-val">XHR</span><button class="btn-mini kv-copy" data-copy-value="XHR" title="复制该值">复制</button></div><div class="kv-line" data-line="5"><span class="kv-gutter"><span class="kv-lineno">5</span></span><span class="kv-key" title="MIME">MIME</span><span class="kv-sep">:</span><span class="kv-val">application/json</span><button class="btn-mini kv-copy" data-copy-value="application/json" title="复制该值">复制</button></div><div class="kv-line" data-line="6"><span class="kv-gutter"><span class="kv-lineno">6</span></span><span class="kv-key" title="大小">大小</span><span class="kv-sep">:</span><span class="kv-val">256 B</span><button class="btn-mini kv-copy" data-copy-value="256 B" title="复制该值">复制</button></div><div class="kv-line" data-line="7"><span class="kv-gutter"><span class="kv-lineno">7</span></span><span class="kv-key" title="耗时">耗时</span><span class="kv-sep">:</span><span class="kv-val">123ms</span><button class="btn-mini kv-copy" data-copy-value="123ms" title="复制该值">复制</button></div><div class="kv-line" data-line="8"><span class="kv-gutter"><span class="kv-lineno">8</span></span><span class="kv-key" title="主域名">主域名</span><span class="kv-sep">:</span><span class="kv-val">example.com</span><button class="btn-mini kv-copy" data-copy-value="example.com" title="复制该值">复制</button></div><div class="kv-line" data-line="9"><span class="kv-gutter"><span class="kv-lineno">9</span></span><span class="kv-key" title="host">host</span><span class="kv-sep">:</span><span class="kv-val">api.example.com</span><button class="btn-mini kv-copy" data-copy-value="api.example.com" title="复制该值">复制</button></div></div></div></div><div class="data-block db-kv"><div class="db-head"><span class="db-title">Query 参数</span><span class="db-meta">2 项</span><span class="db-spacer"></span><button class="btn-mini db-copy" data-copy-block="">复制</button><button class="btn-mini db-max" data-max="" title="最大化查看">⛶</button></div><div class="db-body"><div class="kv-viewer" data-raw="{
+  &quot;from&quot;: &quot;web&quot;,
+  &quot;t&quot;: &quot;1&quot;
+}"><div class="kv-line" data-line="1"><span class="kv-gutter"><span class="kv-lineno">1</span></span><span class="kv-key" title="from">from</span><span class="kv-sep">:</span><span class="kv-val">web</span><button class="btn-mini kv-copy" data-copy-value="web" title="复制该值">复制</button></div><div class="kv-line" data-line="2"><span class="kv-gutter"><span class="kv-lineno">2</span></span><span class="kv-key" title="t">t</span><span class="kv-sep">:</span><span class="kv-val">1</span><button class="btn-mini kv-copy" data-copy-value="1" title="复制该值">复制</button></div></div></div></div><div class="data-block db-kv"><div class="db-head"><span class="db-title">请求头</span><span class="db-meta">3 项</span><span class="db-spacer"></span><button class="btn-mini db-copy" data-copy-block="">复制</button><button class="btn-mini db-max" data-max="" title="最大化查看">⛶</button></div><div class="db-body"><div class="kv-viewer" data-raw="{
+  &quot;Content-Type&quot;: &quot;application/json&quot;,
+  &quot;Authorization&quot;: &quot;Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjd9&quot;,
+  &quot;X-Trace-Id&quot;: &quot;8f2c1a90b3&quot;
+}"><div class="kv-line" data-line="1"><span class="kv-gutter"><span class="kv-lineno">1</span></span><span class="kv-key" title="Content-Type">Content-Type</span><span class="kv-sep">:</span><span class="kv-val">application/json</span><button class="btn-mini kv-copy" data-copy-value="application/json" title="复制该值">复制</button></div><div class="kv-line" data-line="2"><span class="kv-gutter"><span class="kv-lineno">2</span></span><span class="kv-key" title="Authorization">Authorization</span><span class="kv-sep">:</span><span class="kv-val">Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjd9</span><button class="btn-mini kv-copy" data-copy-value="Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjd9" title="复制该值">复制</button></div><div class="kv-line" data-line="3"><span class="kv-gutter"><span class="kv-lineno">3</span></span><span class="kv-key" title="X-Trace-Id">X-Trace-Id</span><span class="kv-sep">:</span><span class="kv-val">8f2c1a90b3</span><button class="btn-mini kv-copy" data-copy-value="8f2c1a90b3" title="复制该值">复制</button></div></div></div></div><div class="data-block db-kv"><div class="db-head"><span class="db-title">响应头</span><span class="db-meta">3 项</span><span class="db-spacer"></span><button class="btn-mini db-copy" data-copy-block="">复制</button><button class="btn-mini db-max" data-max="" title="最大化查看">⛶</button></div><div class="db-body"><div class="kv-viewer" data-raw="{
+  &quot;Content-Type&quot;: &quot;application/json; charset=utf-8&quot;,
+  &quot;Set-Cookie&quot;: &quot;sid=ab3f91c0; Path=/; HttpOnly&quot;,
+  &quot;Cache-Control&quot;: &quot;no-store&quot;
+}"><div class="kv-line" data-line="1"><span class="kv-gutter"><span class="kv-lineno">1</span></span><span class="kv-key" title="Content-Type">Content-Type</span><span class="kv-sep">:</span><span class="kv-val">application/json; charset=utf-8</span><button class="btn-mini kv-copy" data-copy-value="application/json; charset=utf-8" title="复制该值">复制</button></div><div class="kv-line" data-line="2"><span class="kv-gutter"><span class="kv-lineno">2</span></span><span class="kv-key" title="Set-Cookie">Set-Cookie</span><span class="kv-sep">:</span><span class="kv-val">sid=ab3f91c0; Path=/; HttpOnly</span><button class="btn-mini kv-copy" data-copy-value="sid=ab3f91c0; Path=/; HttpOnly" title="复制该值">复制</button></div><div class="kv-line" data-line="3"><span class="kv-gutter"><span class="kv-lineno">3</span></span><span class="kv-key" title="Cache-Control">Cache-Control</span><span class="kv-sep">:</span><span class="kv-val">no-store</span><button class="btn-mini kv-copy" data-copy-value="no-store" title="复制该值">复制</button></div></div></div></div><div class="data-block db-kv"><div class="db-head"><span class="db-title">Timing</span><span class="db-meta">6 项</span><span class="db-spacer"></span><button class="btn-mini db-copy" data-copy-block="">复制</button><button class="btn-mini db-max" data-max="" title="最大化查看">⛶</button></div><div class="db-body"><div class="kv-viewer" data-raw="{
+  &quot;dns&quot;: 1,
+  &quot;connect&quot;: 2,
+  &quot;ssl&quot;: 5,
+  &quot;send&quot;: 1,
+  &quot;wait&quot;: 98,
+  &quot;receive&quot;: 16
+}"><div class="kv-line" data-line="1"><span class="kv-gutter"><span class="kv-lineno">1</span></span><span class="kv-key" title="dns">dns</span><span class="kv-sep">:</span><span class="kv-val">1</span><button class="btn-mini kv-copy" data-copy-value="1" title="复制该值">复制</button></div><div class="kv-line" data-line="2"><span class="kv-gutter"><span class="kv-lineno">2</span></span><span class="kv-key" title="connect">connect</span><span class="kv-sep">:</span><span class="kv-val">2</span><button class="btn-mini kv-copy" data-copy-value="2" title="复制该值">复制</button></div><div class="kv-line" data-line="3"><span class="kv-gutter"><span class="kv-lineno">3</span></span><span class="kv-key" title="ssl">ssl</span><span class="kv-sep">:</span><span class="kv-val">5</span><button class="btn-mini kv-copy" data-copy-value="5" title="复制该值">复制</button></div><div class="kv-line" data-line="4"><span class="kv-gutter"><span class="kv-lineno">4</span></span><span class="kv-key" title="send">send</span><span class="kv-sep">:</span><span class="kv-val">1</span><button class="btn-mini kv-copy" data-copy-value="1" title="复制该值">复制</button></div><div class="kv-line" data-line="5"><span class="kv-gutter"><span class="kv-lineno">5</span></span><span class="kv-key" title="wait">wait</span><span class="kv-sep">:</span><span class="kv-val">98</span><button class="btn-mini kv-copy" data-copy-value="98" title="复制该值">复制</button></div><div class="kv-line" data-line="6"><span class="kv-gutter"><span class="kv-lineno">6</span></span><span class="kv-key" title="receive">receive</span><span class="kv-sep">:</span><span class="kv-val">16</span><button class="btn-mini kv-copy" data-copy-value="16" title="复制该值">复制</button></div></div></div></div></div>
+  <div class="pv-pane" id="pane-request"><div class="data-block db-json"><div class="db-head"><span class="db-title">请求体</span><span class="db-meta">9 行</span><span class="db-spacer"></span><button class="btn-mini db-copy" data-copy-block="">复制</button><button class="btn-mini db-max" data-max="" title="最大化查看">⛶</button><button class="btn-mini db-act" data-db-act="curl" data-db-seq="1">复制为 cURL</button></div><div class="db-body"><div class="json-viewer code" data-raw="{
+  &quot;username&quot;: &quot;admin&quot;,
+  &quot;password&quot;: &quot;123456&quot;,
+  &quot;remember&quot;: true,
+  &quot;extra&quot;: {
+    &quot;device&quot;: &quot;pc&quot;,
+    &quot;ip&quot;: &quot;10.0.0.7&quot;
+  }
+}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"username"</span><span class="j-punc">:</span> <span class="j-string">"admin"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="username" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"password"</span><span class="j-punc">:</span> <span class="j-string">"123456"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="password" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">  <span class="j-key">"remember"</span><span class="j-punc">:</span> <span class="j-boolean">true</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="remember" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-fold" data-start="5" data-end="8">▼</span><span class="json-lineno">5</span></span><span class="json-code">  <span class="j-key">"extra"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "device": "pc",... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="6"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">    <span class="j-key">"device"</span><span class="j-punc">:</span> <span class="j-string">"pc"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra.device" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="7"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code">    <span class="j-key">"ip"</span><span class="j-punc">:</span> <span class="j-string">"10.0.0.7"</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra.ip" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="8"><span class="json-gutter"><span class="json-lineno">8</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="9"><span class="json-gutter"><span class="json-lineno">9</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div></div>
+  <div class="pv-pane" id="pane-response"><div class="data-block db-json"><div class="db-head"><span class="db-title">响应体</span><span class="db-meta">20 行</span><span class="db-spacer"></span><button class="btn-mini db-copy" data-copy-block="">复制</button><button class="btn-mini db-max" data-max="" title="最大化查看">⛶</button></div><div class="db-body"><div class="json-viewer code" data-raw="{
+  &quot;code&quot;: 0,
+  &quot;msg&quot;: &quot;ok&quot;,
+  &quot;data&quot;: {
+    &quot;token&quot;: &quot;tk_001&quot;,
+    &quot;expire&quot;: 7200,
+    &quot;user&quot;: {
+      &quot;id&quot;: 7,
+      &quot;name&quot;: &quot;张三&quot;,
+      &quot;roles&quot;: [
+        &quot;admin&quot;,
+        &quot;operator&quot;
+      ],
+      &quot;dept&quot;: {
+        &quot;id&quot;: 3,
+        &quot;name&quot;: &quot;技术科&quot;
+      }
+    }
+  }
+}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno"> 1</span></span><span class="json-code"><span class="j-punc">{</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno"> 2</span></span><span class="json-code">  <span class="j-key">"code"</span><span class="j-punc">:</span> <span class="j-number">0</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="code" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno"> 3</span></span><span class="json-code">  <span class="j-key">"msg"</span><span class="j-punc">:</span> <span class="j-string">"ok"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="msg" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-fold" data-start="4" data-end="19">▼</span><span class="json-lineno"> 4</span></span><span class="json-code">  <span class="j-key">"data"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "token": "tk_001",... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno"> 5</span></span><span class="json-code">    <span class="j-key">"token"</span><span class="j-punc">:</span> <span class="j-string">"tk_001"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.token" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="6"><span class="json-gutter"><span class="json-lineno"> 6</span></span><span class="json-code">    <span class="j-key">"expire"</span><span class="j-punc">:</span> <span class="j-number">7200</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.expire" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="7"><span class="json-gutter"><span class="json-fold" data-start="7" data-end="18">▼</span><span class="json-lineno"> 7</span></span><span class="json-code">    <span class="j-key">"user"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "id": 7,... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="8"><span class="json-gutter"><span class="json-lineno"> 8</span></span><span class="json-code">      <span class="j-key">"id"</span><span class="j-punc">:</span> <span class="j-number">7</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.id" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="9"><span class="json-gutter"><span class="json-lineno"> 9</span></span><span class="json-code">      <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"张三"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.name" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="10"><span class="json-gutter"><span class="json-fold" data-start="10" data-end="13">▼</span><span class="json-lineno">10</span></span><span class="json-code">      <span class="j-key">"roles"</span><span class="j-punc">:</span> <span class="j-punc">[</span><span class="json-collapsed-preview"> "admin",... ],</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.roles" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="11"><span class="json-gutter"><span class="json-lineno">11</span></span><span class="json-code">        <span class="j-string">"admin"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.roles.0" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="12"><span class="json-gutter"><span class="json-lineno">12</span></span><span class="json-code">        <span class="j-string">"operator"</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.roles.1" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="13"><span class="json-gutter"><span class="json-lineno">13</span></span><span class="json-code">      <span class="j-punc">]</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="14"><span class="json-gutter"><span class="json-fold" data-start="14" data-end="17">▼</span><span class="json-lineno">14</span></span><span class="json-code">      <span class="j-key">"dept"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "id": 3,... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.dept" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="15"><span class="json-gutter"><span class="json-lineno">15</span></span><span class="json-code">        <span class="j-key">"id"</span><span class="j-punc">:</span> <span class="j-number">3</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.dept.id" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="16"><span class="json-gutter"><span class="json-lineno">16</span></span><span class="json-code">        <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"技术科"</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.dept.name" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="17"><span class="json-gutter"><span class="json-lineno">17</span></span><span class="json-code">      <span class="j-punc">}</span></span></div><div class="json-line" data-line="18"><span class="json-gutter"><span class="json-lineno">18</span></span><span class="json-code">    <span class="j-punc">}</span></span></div><div class="json-line" data-line="19"><span class="json-gutter"><span class="json-lineno">19</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="20"><span class="json-gutter"><span class="json-lineno">20</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div></div>
+</div>
+<div id="editReqModal" class="modal-mask hide">
+    <div class="modal modal-lg">
+      <div class="modal-head">
+        <span class="modal-title" id="editReqModalTitle">编辑请求</span>
+        <button id="editReqModalClose" class="modal-close" title="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-subtitle">请求地址 URL<span class="modal-tip">（改末尾的 ID / 路径即可造不同数据）</span></div>
+        <textarea id="editReqUrl" class="edit-req-url" placeholder="http://host/path/..."></textarea>
+        <div class="modal-subtitle">请求头 Headers（JSON 对象）</div>
+        <textarea id="editReqHeaders" class="edit-req-headers" placeholder="{&quot;Content-Type&quot;:&quot;application/json&quot;}"></textarea>
+        <div class="modal-subtitle">请求体 Body</div>
+        <textarea id="editReqBody" class="edit-req-body" placeholder="请求体原文（可为 JSON / 表单 / 任意文本）"></textarea>
+        <div id="editReqErr" class="modal-error"></div>
+        <div class="modal-actions">
+          <button id="editReqSave" class="btn btn-primary">保存修改</button>
+          <button id="editReqCancel" class="btn">取消</button>
+        </div>
+        <div class="modal-hint">修改会写回本条记录，导出 HAR/JSON 与 Mock 都会用新值；Mock 运行中改完也立即生效。</div>
+      </div>
+    </div>
+  </div>
+<div id="editResModal" class="modal-mask hide">
+    <div class="modal modal-lg">
+      <div class="modal-head">
+        <span class="modal-title" id="editResModalTitle">编辑响应</span>
+        <button id="editResModalClose" class="modal-close" title="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-subtitle">状态码 Status</div>
+        <div class="edit-res-status-row">
+          <input id="editResStatus" class="input edit-res-status" maxlength="3" placeholder="200">
+          <input id="editResStatusText" class="input" placeholder="状态文本（可选，如 OK / Not Found）">
+        </div>
+        <div class="modal-subtitle">响应头 Headers（JSON 对象）</div>
+        <textarea id="editResHeaders" class="edit-res-headers" placeholder="{&quot;Content-Type&quot;:&quot;application/json&quot;}"></textarea>
+        <div class="modal-subtitle">响应体 Body</div>
+        <textarea id="editResBody" class="edit-res-body" placeholder="响应体原文（可为 JSON / HTML / 任意文本）"></textarea>
+        <div id="editResErr" class="modal-error"></div>
+        <div class="modal-actions">
+          <button id="editResSave" class="btn btn-primary">保存修改</button>
+          <button id="editResCancel" class="btn">取消</button>
+        </div>
+        <div class="modal-hint">修改会写回本条记录，导出 HAR/JSON 与 Mock 都会用新值；Mock 运行中改完也立即生效。</div>
+      </div>
+    </div>
+  </div>
+<script>
+document.querySelectorAll(".pv-tab").forEach(function (t) {
+  t.addEventListener("click", function () {
+    document.querySelectorAll(".pv-tab").forEach(function (x) { x.classList.remove("active"); });
+    document.querySelectorAll(".pv-pane").forEach(function (x) { x.classList.remove("active"); });
+    t.classList.add("active");
+    document.getElementById("pane-" + t.getAttribute("data-pane")).classList.add("active");
+  });
+});
+function flash(btn) {
+  var old = btn.textContent;
+  btn.textContent = "已复制 ✓";
+  btn.disabled = true;
+  setTimeout(function () { btn.textContent = old; btn.disabled = false; }, 1200);
+}
+function copy(txt, btn) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(function () { flash(btn); });
+  } else {
+    var ta = document.createElement("textarea");
+    ta.value = txt; document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); flash(btn); } catch (e) { alert("复制失败"); }
+    ta.remove();
+  }
+}
+var SAMPLE_REQ = {
+  url: "https://api.example.com/v1/login?from=web&t=1",
+  headers: { "Content-Type": "application/json", Authorization: "Bearer eyJhbGciOiJIUzI1NiJ9" },
+  body: '{"username":"admin","password":"123456"}'
+};
+var SAMPLE_RES = {
+  status: "200",
+  status_text: "OK",
+  headers: { "Content-Type": "application/json; charset=utf-8", "Set-Cookie": "sid=ab3f91c0; Path=/; HttpOnly" },
+  body: '{
+  "code": 0,
+  "data": { "token": "tk_001" },
+  "msg": "ok"
+}'
+};
+function closeModal(id) { document.getElementById(id).classList.add("hide"); }
+function openModal(id) { document.getElementById(id).classList.remove("hide"); }
+function fillModal(id, s) {
+  if (id === "editReqModal") {
+    document.getElementById("editReqUrl").value = s.url;
+    document.getElementById("editReqHeaders").value = JSON.stringify(s.headers, null, 2);
+    document.getElementById("editReqBody").value = s.body;
+  } else {
+    document.getElementById("editResStatus").value = s.status;
+    document.getElementById("editResStatusText").value = s.status_text;
+    document.getElementById("editResHeaders").value = JSON.stringify(s.headers, null, 2);
+    document.getElementById("editResBody").value = s.body;
+  }
+}
+["editReqModal", "editResModal"].forEach(function (id) {
+  var m = document.getElementById(id);
+  var close = m.querySelector(".modal-close"), cancel = m.querySelector(".modal-actions .btn:not(.btn-primary)"), save = m.querySelector(".btn-primary");
+  if (close) close.addEventListener("click", function () { closeModal(id); });
+  if (cancel) cancel.addEventListener("click", function () { closeModal(id); });
+  m.addEventListener("click", function (e) { if (e.target === m) closeModal(id); });
+  if (save) save.addEventListener("click", function () {
+    closeModal(id);
+    var old = save.textContent;
+    save.textContent = "已保存 ✓";
+    setTimeout(function () { save.textContent = old; }, 1200);
+  });
+});
+document.addEventListener("click", function (e) {
+  if (e.target.closest("#editReqBtn")) { fillModal("editReqModal", SAMPLE_REQ); openModal("editReqModal"); return; }
+  if (e.target.closest("#editResBtn")) { fillModal("editResModal", SAMPLE_RES); openModal("editResModal"); return; }
+  var b = e.target.closest("[data-copy-block]");
+  if (b) {
+    var holder = b.closest(".data-block").querySelector("[data-raw]");
+    copy(holder.getAttribute("data-raw"), b);
+    return;
+  }
+  var v = e.target.closest("[data-copy-value]");
+  if (v) { copy(v.getAttribute("data-copy-value"), v); return; }
+  var f = e.target.closest(".json-fold");
+  if (f) {
+    var viewer = f.closest(".json-viewer");
+    var start = Number(f.getAttribute("data-start")), end = Number(f.getAttribute("data-end"));
+    var collapsed = f.classList.toggle("collapsed");
+    f.textContent = collapsed ? "▶" : "▼";
+    for (var i = start + 1; i < end; i++) {
+      var line = viewer.querySelector('.json-line[data-line="' + i + '"]');
+      if (line) line.classList.toggle("fold-hidden", collapsed);
+    }
+  }
+});
+</script>
+</body>
+</html>

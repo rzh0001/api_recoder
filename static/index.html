@@ -268,7 +268,47 @@
           <button id="editReqSave" class="btn btn-primary">保存修改</button>
           <button id="editReqCancel" class="btn">取消</button>
         </div>
-        <div class="modal-hint">修改会写回本条记录，导出 HAR/JSON 与启动 Mock 都会用新值。Mock 运行中不可编辑。</div>
+        <div class="modal-hint">修改会写回本条记录，导出 HAR/JSON 与 Mock 都会用新值；Mock 运行中改完也立即生效。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ JSON / 键值对 最大化查看弹窗 ============ -->
+  <div id="jsonMaxModal" class="modal-mask hide">
+    <div class="modal">
+      <div class="modal-head">
+        <span class="modal-title" id="jsonMaxTitle">最大化查看</span>
+        <span class="db-spacer"></span>
+        <button id="jsonMaxCopy" class="btn btn-sm" title="复制全部内容">复制</button>
+        <button id="jsonMaxClose" class="modal-close" title="关闭（Esc）">×</button>
+      </div>
+      <div class="modal-body" id="jsonMaxBody"></div>
+    </div>
+  </div>
+
+  <!-- ============ 编辑响应弹窗 ============ -->
+  <div id="editResModal" class="modal-mask hide">
+    <div class="modal modal-lg">
+      <div class="modal-head">
+        <span class="modal-title" id="editResModalTitle">编辑响应</span>
+        <button id="editResModalClose" class="modal-close" title="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-subtitle">状态码 Status</div>
+        <div class="edit-res-status-row">
+          <input id="editResStatus" class="input edit-res-status" maxlength="3" placeholder="200" />
+          <input id="editResStatusText" class="input" placeholder="状态文本（可选，如 OK / Not Found）" />
+        </div>
+        <div class="modal-subtitle">响应头 Headers（JSON 对象）</div>
+        <textarea id="editResHeaders" class="edit-res-headers" placeholder='{"Content-Type":"application/json"}'></textarea>
+        <div class="modal-subtitle">响应体 Body</div>
+        <textarea id="editResBody" class="edit-res-body" placeholder="响应体原文（可为 JSON / HTML / 任意文本）"></textarea>
+        <div id="editResErr" class="modal-error"></div>
+        <div class="modal-actions">
+          <button id="editResSave" class="btn btn-primary">保存修改</button>
+          <button id="editResCancel" class="btn">取消</button>
+        </div>
+        <div class="modal-hint">修改会写回本条记录，导出 HAR/JSON 与 Mock 都会用新值；Mock 运行中改完也立即生效。</div>
       </div>
     </div>
   </div>
