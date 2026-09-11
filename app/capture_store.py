@@ -178,6 +178,7 @@ class CaptureStore:
                     self.by_seq[s] = r
                     max_seq = max(max_seq, s)
             self._seq = max_seq
+            self.endpoint_docs = obj.get("endpoint_docs") or {}
             self._dirty = False
 
     def persist(self):
@@ -194,8 +195,10 @@ class CaptureStore:
             self._dirty = False
         try:
             tmp = path + ".tmp"
+            with self._lock:
+                endpoint_docs = dict(self.endpoint_docs)
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"seq": seq, "requests": snapshot}, f, ensure_ascii=False)
+                json.dump({"seq": seq, "requests": snapshot, "endpoint_docs": endpoint_docs}, f, ensure_ascii=False)
             os.replace(tmp, path)
         except Exception:
             with self._lock:
@@ -223,6 +226,8 @@ class CaptureStore:
             self.ended_at = None
             # 「打开」关联的源文件路径（「保存」时覆盖写回它）
             self.source_path = None
+            # 接口级文档（method+path 唯一真源），与请求库 / 录制详情共享
+            self.endpoint_docs = {}
         self._schedule_persist()
 
     def add(self, record):
@@ -336,6 +341,83 @@ class CaptureStore:
                 rec.pop("annotations", None)
         self._schedule_persist()
         return True
+
+    # ---------- 接口级文档（与请求库共享） ----------
+    def _endpoint_key(self, method, path):
+        return f"{((method or 'GET').upper())} {_norm(path or '')}"
+
+    def _fallback_endpoint_doc(self, method, path):
+        """没有显式接口文档时，用该端点下录制记录的 tags/note 做兜底。"""
+        method = (method or "GET").upper()
+        path = _norm(path or "")
+        note = ""
+        tags = []
+        for r in self.requests:
+            if (r.get("method") or "GET").upper() != method:
+                continue
+            if _norm(r.get("path") or "") != path:
+                continue
+            if not note and r.get("note"):
+                note = r["note"]
+            for t in r.get("tags") or []:
+                if t and t not in tags:
+                    tags.append(t)
+            if note and tags:
+                break
+        return {"name": "", "note": note, "tags": tags}
+
+    def get_endpoint_doc(self, method, path):
+        """读取接口级文档；无显式文档时 fallback 到记录级 tags/note。"""
+        with self._lock:
+            key = self._endpoint_key(method, path)
+            stored = self.endpoint_docs.get(key) or {}
+            fallback = self._fallback_endpoint_doc(method, path)
+        doc = {
+            "method": (method or "GET").upper(),
+            "path": _norm(path or ""),
+            "name": stored.get("name") if stored.get("name") is not None else fallback.get("name", ""),
+            "note": stored.get("note") if stored.get("note") is not None else fallback.get("note", ""),
+            "tags": stored.get("tags") if stored.get("tags") is not None else fallback.get("tags", []),
+            "req": stored.get("req") if stored.get("req") is not None else [],
+            "resp": stored.get("resp") if stored.get("resp") is not None else [],
+        }
+        return doc
+
+    def set_endpoint_doc(self, method, path, name=None, note=None, tags=None, req=None, resp=None):
+        """更新接口级文档。None 表示不改该字段。返回当前完整文档。"""
+        with self._lock:
+            key = self._endpoint_key(method, path)
+            doc = self.endpoint_docs.get(key) or {}
+            if name is not None:
+                doc["name"] = name
+            if note is not None:
+                doc["note"] = note
+            if tags is not None:
+                doc["tags"] = list(tags)
+            if req is not None:
+                doc["req"] = list(req)
+            if resp is not None:
+                doc["resp"] = list(resp)
+            doc["updated_at"] = time.time()
+            self.endpoint_docs[key] = doc
+        self._schedule_persist()
+        return self.get_endpoint_doc(method, path)
+
+    def list_endpoint_docs(self):
+        """返回所有已保存的接口文档列表（含 method/path，不含 fallback）。"""
+        with self._lock:
+            return [
+                {
+                    "method": k.split(" ", 1)[0],
+                    "path": k.split(" ", 1)[1] if " " in k else "",
+                    "name": v.get("name", ""),
+                    "note": v.get("note", ""),
+                    "tags": list(v.get("tags") or []),
+                    "req": list(v.get("req") or []),
+                    "resp": list(v.get("resp") or []),
+                }
+                for k, v in self.endpoint_docs.items()
+            ]
 
     # ---------- 轻量拷贝（用于 WebSocket 实时推送） ----------
     def light(self, rec):

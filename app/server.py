@@ -325,6 +325,39 @@ def api_response_edit():
     return Response(json.dumps({"ok": True}, ensure_ascii=False), mimetype="application/json")
 
 
+@app.post("/api/endpoint/doc")
+def api_endpoint_doc():
+    """读写接口级文档（method+path 唯一真源）。
+    请求体：{ method, path, name?, note?, tags?, req?, resp? }
+    仅提供 method+path 时为读取；提供 name/note/tags/req/resp 任一字段时为部分更新。
+    读取无显式文档时，自动 fallback 到该端点下录制记录的 tags/note。
+    """
+    data = request.get_json(silent=True) or {}
+    method = data.get("method") or "GET"
+    path = data.get("path") or "/"
+    if not isinstance(path, str) or not path:
+        return _json_err("缺少有效的 path", 400)
+
+    write_fields = {}
+    for k in ("name", "note", "tags", "req", "resp"):
+        if k in data:
+            write_fields[k] = data.get(k)
+    if write_fields:
+        doc = state.store.set_endpoint_doc(method, path, **write_fields)
+    else:
+        doc = state.store.get_endpoint_doc(method, path)
+    return Response(json.dumps({"ok": True, "doc": doc}, ensure_ascii=False), mimetype="application/json")
+
+
+@app.post("/api/endpoint/docs")
+def api_endpoint_docs():
+    """批量读取已保存的接口文档列表。"""
+    return Response(
+        json.dumps({"ok": True, "docs": state.store.list_endpoint_docs()}, ensure_ascii=False),
+        mimetype="application/json",
+    )
+
+
 # ---------------- 辅助：从记录推断文件名 / MIME ----------------
 _MIME_BY_TYPE = {
     "SCRIPT": "application/javascript",
