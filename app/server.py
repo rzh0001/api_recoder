@@ -798,6 +798,14 @@ def api_mock_logs():
     )
 
 
+@app.post("/api/mock/logs/clear")
+def api_mock_logs_clear():
+    """清空处理记录（不影响运行状态与命中计数）。"""
+    state.mock_manager.clear_logs()
+    state.broadcast(json.dumps({"type": "mock_log"}, ensure_ascii=False))
+    return Response(json.dumps({"ok": True}), mimetype="application/json")
+
+
 @app.post("/api/mock/test")
 def api_mock_test():
     """快速测试某条 mock 接口：由主服务代理请求到 mock 端口，避开跨域(CORS)。

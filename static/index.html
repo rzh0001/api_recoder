@@ -165,6 +165,7 @@
                 <span>处理记录</span>
                 <span id="mockLogsCount" class="muted"></span>
                 <div class="spacer"></div>
+                <button id="mockLogsClearBtn" class="btn" title="清空全部处理记录">清空</button>
                 <button id="mockLogsRefreshBtn" class="btn">刷新</button>
               </div>
               <div id="mockLogList" class="mock-log-list">
@@ -260,9 +261,25 @@
         <div class="modal-subtitle">请求地址 URL<span class="modal-tip">（改末尾的 ID / 路径即可造不同数据）</span></div>
         <textarea id="editReqUrl" class="edit-req-url" placeholder="http://host/path/..."></textarea>
         <div class="modal-subtitle">请求头 Headers（JSON 对象）</div>
-        <textarea id="editReqHeaders" class="edit-req-headers" placeholder='{"Content-Type":"application/json"}'></textarea>
+        <div class="json-edit" data-json-edit>
+          <div class="json-edit-bar">
+            <button type="button" class="je-mode is-active" data-je-mode="preview">预览</button>
+            <button type="button" class="je-mode" data-je-mode="edit">编辑原文</button>
+            <span class="je-hint">JSON 对象</span>
+          </div>
+          <div class="json-edit-preview"></div>
+          <textarea id="editReqHeaders" class="edit-req-headers hide" placeholder='{"Content-Type":"application/json"}'></textarea>
+        </div>
         <div class="modal-subtitle">请求体 Body</div>
-        <textarea id="editReqBody" class="edit-req-body" placeholder="请求体原文（可为 JSON / 表单 / 任意文本）"></textarea>
+        <div class="json-edit" data-json-edit>
+          <div class="json-edit-bar">
+            <button type="button" class="je-mode is-active" data-je-mode="preview">预览</button>
+            <button type="button" class="je-mode" data-je-mode="edit">编辑原文</button>
+            <span class="je-hint">JSON / 文本</span>
+          </div>
+          <div class="json-edit-preview"></div>
+          <textarea id="editReqBody" class="edit-req-body hide" placeholder="请求体原文（可为 JSON / 表单 / 任意文本）"></textarea>
+        </div>
         <div id="editReqErr" class="modal-error"></div>
         <div class="modal-actions">
           <button id="editReqSave" class="btn btn-primary">保存修改</button>
@@ -279,10 +296,33 @@
       <div class="modal-head">
         <span class="modal-title" id="jsonMaxTitle">最大化查看</span>
         <span class="db-spacer"></span>
+        <button id="jsonMaxCompareBtn" class="btn btn-sm" title="展开对比：与另一份 JSON 比对差异">对比</button>
         <button id="jsonMaxCopy" class="btn btn-sm" title="复制全部内容">复制</button>
         <button id="jsonMaxClose" class="modal-close" title="关闭（Esc）">×</button>
       </div>
-      <div class="modal-body" id="jsonMaxBody"></div>
+      <div class="modal-body json-max-body">
+        <div class="json-max-bar hide" id="jsonMaxBar">
+          <span class="jmc-title">对比</span>
+          <span class="jm-mode-group">
+            <button class="jm-mode is-active" data-jm-mode="field" title="按字段路径对比：忽略缩进与字段顺序，只比字段本身">按字段</button>
+            <button class="jm-mode" data-jm-mode="line" title="严格按行对比：逐行比文本，缩进不同也算差异">按行</button>
+          </span>
+          <span class="db-spacer"></span>
+          <button id="jsonMaxCompareEdit" class="btn btn-sm hide" title="回到原文重新粘贴/修改">编辑原文</button>
+          <button id="jsonMaxCompareClear" class="btn btn-sm" title="清空对比内容">清空</button>
+          <button id="jsonMaxCompareRun" class="btn btn-sm btn-primary">对比</button>
+          <div class="jmc-stat" id="jsonMaxCompareStat">粘贴另一份 JSON 后点「对比」，差异会在左右两侧 JSON 区里高亮。</div>
+        </div>
+        <div class="json-max-cols">
+          <div class="json-max-main" id="jsonMaxBody"></div>
+          <div class="json-max-compare hide" id="jsonMaxCompare">
+            <div class="json-max-compare-body">
+              <textarea id="jsonMaxCompareInput" class="json-max-compare-input" placeholder="在此粘贴另一份 JSON，点「对比」查看差异（差异会在左右两个 JSON 区高亮）"></textarea>
+              <div class="json-max-compare-view hide" id="jsonMaxCompareView"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -300,9 +340,25 @@
           <input id="editResStatusText" class="input" placeholder="状态文本（可选，如 OK / Not Found）" />
         </div>
         <div class="modal-subtitle">响应头 Headers（JSON 对象）</div>
-        <textarea id="editResHeaders" class="edit-res-headers" placeholder='{"Content-Type":"application/json"}'></textarea>
+        <div class="json-edit" data-json-edit>
+          <div class="json-edit-bar">
+            <button type="button" class="je-mode is-active" data-je-mode="preview">预览</button>
+            <button type="button" class="je-mode" data-je-mode="edit">编辑原文</button>
+            <span class="je-hint">JSON 对象</span>
+          </div>
+          <div class="json-edit-preview"></div>
+          <textarea id="editResHeaders" class="edit-res-headers hide" placeholder='{"Content-Type":"application/json"}'></textarea>
+        </div>
         <div class="modal-subtitle">响应体 Body</div>
-        <textarea id="editResBody" class="edit-res-body" placeholder="响应体原文（可为 JSON / HTML / 任意文本）"></textarea>
+        <div class="json-edit" data-json-edit>
+          <div class="json-edit-bar">
+            <button type="button" class="je-mode is-active" data-je-mode="preview">预览</button>
+            <button type="button" class="je-mode" data-je-mode="edit">编辑原文</button>
+            <span class="je-hint">JSON / 文本</span>
+          </div>
+          <div class="json-edit-preview"></div>
+          <textarea id="editResBody" class="edit-res-body hide" placeholder="响应体原文（可为 JSON / HTML / 任意文本）"></textarea>
+        </div>
         <div id="editResErr" class="modal-error"></div>
         <div class="modal-actions">
           <button id="editResSave" class="btn btn-primary">保存修改</button>

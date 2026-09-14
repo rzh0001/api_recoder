@@ -797,13 +797,13 @@ mark.hl {
   overflow-wrap: normal;
 }
 /* 字段级注释（✎）：默认淡显，悬停该行时高亮 */
-.j-ann-btn {
+.j-ann-btn, .j-copy-btn {
   cursor: pointer; color: var(--muted);
   margin-left: 8px; font-size: 11px;
   opacity: .25; transition: opacity .1s ease, color .1s ease;
   -webkit-user-select: none; -moz-user-select: none; user-select: none;
 }
-.json-line:hover .j-ann-btn { opacity: 1; color: var(--primary); }
+.json-line:hover .j-ann-btn, .json-line:hover .j-copy-btn { opacity: 1; color: var(--primary); pointer-events: auto; }
 .j-ann-txt {
   color: #b8860b; margin-left: 6px;
   font-style: italic; font-size: 11px;
@@ -894,9 +894,56 @@ mark.hl {
 #jsonMaxModal .modal { width: 92vw; max-width: 1200px; max-height: 90vh; }
 #jsonMaxModal .modal-head { gap: 8px; }
 #jsonMaxModal .modal-body { max-height: 82vh; overflow: auto; padding: 10px 14px; }
+#jsonMaxModal .modal-body.json-max-body { max-height: none; overflow: hidden; }
 #jsonMaxBody { font-size: 13px; line-height: 1.5; }
 #jsonMaxBody .json-viewer, #jsonMaxBody .kv-viewer { width: 100%; }
-#jsonMaxBody .json-gutter { background: rgba(0,0,0,.03); }
+
+/* 最大化弹窗 · git-diff 式对比：顶部共享工具栏 + 左右等高两栏，滚动联动 */
+/* 左侧原 JSON，右侧对比结果（默认收起）；两栏等高，滚动时同步 */
+#jsonMaxCompareBtn.is-active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft-2); }
+.json-max-body { display: flex; flex-direction: column; gap: 8px; align-items: stretch; height: calc(90vh - 58px); max-height: 82vh; overflow: hidden; }
+.json-max-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.json-max-cols { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; align-items: stretch; }
+.json-max-main { flex: 1 1 50%; min-width: 0; min-height: 0; overflow: auto; }
+.json-max-compare {
+  flex: 1 1 50%; min-width: 0; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--border); padding-left: 12px;
+}
+.json-max-compare-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.jmc-title { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.jm-mode-group {
+  display: inline-flex; overflow: hidden;
+  border: 1px solid var(--border-strong); border-radius: var(--r-pill);
+}
+.jm-mode {
+  height: 22px; padding: 0 10px; cursor: pointer; border: none;
+  background: var(--surface); color: var(--text-2); font-size: 11.5px;
+}
+.jm-mode + .jm-mode { border-left: 1px solid var(--border-strong); }
+.jm-mode:hover { color: var(--accent); }
+.jm-mode.is-active { background: var(--primary); color: #fff; }
+.jmc-stat { font-size: 11px; color: var(--muted); }
+.json-max-bar .jmc-stat { flex-basis: 100%; }
+.jmc-stat.ok { color: var(--accent-strong); }
+.jmc-stat.warn { color: var(--warning); }
+.json-max-compare-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.json-max-compare-input {
+  flex: 1 1 auto; min-height: 0; width: 100%; box-sizing: border-box; resize: none;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: 8px 10px; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 12px; line-height: 1.5; color: var(--text); background: var(--code-bg);
+}
+.json-max-compare-view { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.json-max-compare-view .json-viewer { width: 100%; }
+
+/* 差异高亮：直接落在 JSON 区的行上（左/右各自标记） */
+.json-line.diff-add .json-gutter, .json-line.diff-add .json-code { background: rgba(47,139,224,.13); }
+.json-line.diff-del .json-gutter, .json-line.diff-del .json-code { background: rgba(226,72,59,.13); }
+.json-line.diff-mod .json-gutter, .json-line.diff-mod .json-code { background: rgba(224,138,0,.16); }
+.json-line.diff-add .json-gutter { border-left: 3px solid var(--info); padding-left: 1px; }
+.json-line.diff-del .json-gutter { border-left: 3px solid var(--danger); padding-left: 1px; }
+.json-line.diff-mod .json-gutter { border-left: 3px solid var(--warning); padding-left: 1px; }
 
 /* 标签编辑器：固定在详情顶部，仅标签，紧凑 */
 .detail-tags {
@@ -929,6 +976,31 @@ mark.hl {
 .edit-res-status-row { display: flex; gap: 8px; margin-bottom: 12px; }
 .edit-res-status-row .input { flex: 1 1 auto; min-width: 0; }
 .edit-res-status-row .edit-res-status { flex: 0 0 88px; }
+
+/* JSON 编辑区：与详情页同一套 JSON 组件（预览）+ 原文编辑 双模式 */
+.json-edit {
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--surface); overflow: hidden; margin-bottom: 12px;
+}
+.json-edit-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.je-mode {
+  height: 24px; padding: 0 12px; cursor: pointer;
+  border: 1px solid var(--border-strong); border-radius: var(--r-pill);
+  background: var(--surface); color: var(--text-2); font-size: 12px;
+}
+.je-mode:hover { border-color: var(--accent); color: var(--accent); }
+.je-mode.is-active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.je-hint { margin-left: auto; font-size: 11px; color: var(--muted); }
+.json-edit-preview { max-height: 340px; overflow: auto; }
+.json-edit-preview .code-wrap { margin: 0; }
+.json-edit-preview .json-viewer { border-radius: 0; }
+.json-edit textarea { border: none; border-radius: 0; margin: 0; min-height: 180px; }
+.json-edit textarea:focus { outline: none; }
+.json-edit-empty { padding: 12px; color: var(--muted); font-size: 12px; font-style: italic; }
 .modal-tip { font-weight: 400; color: var(--muted); font-size: 11px; margin-left: 6px; }
 .modal-error { color: #A32D2D; font-size: 12px; min-height: 16px; margin: -4px 0 8px; }
 .modal-actions { display: flex; gap: 8px; }

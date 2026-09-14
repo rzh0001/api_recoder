@@ -26,6 +26,13 @@ const logs = [
     matched: true, status: 200,
     req_headers: {}, req_body: "", res_headers: {}, res_body: '{"ok":true}',
   },
+  {
+    ts: 1785050003, method: "DELETE", path: "/api/w", query: "",
+    matched: false, status: 404,
+    miss_reason: "库中无此接口（method+path 无匹配记录）",
+    req_headers: {}, req_body: "", res_headers: {}, res_body: "",
+    // 旧日志：无 url 字段，应回退到 path + query
+  },
 ];
 
 const jsErrors = [];
@@ -64,13 +71,13 @@ setTimeout(() => {
   assert("加载期无 JS 错误", jsErrors.length === 0, jsErrors.slice(0, 3));
 
   const rows = d.querySelectorAll(".mock-log-row");
-  assert("处理记录渲染 3 条", rows.length === 3);
+  assert("处理记录渲染 4 条", rows.length === 4);
 
   const missBadges = d.querySelectorAll(".badge.miss");
-  assert("未命中徽章 2 个", missBadges.length === 2);
+  assert("未命中徽章 3 个", missBadges.length === 3);
 
   const missReasons = d.querySelectorAll(".miss-reason");
-  assert("行内未命中原因 2 条", missReasons.length === 2);
+  assert("行内未命中原因 3 条", missReasons.length === 3);
   assert(
     "行内原因内容正确（query 不匹配）",
     missReasons.length > 0 && missReasons[0].textContent.indexOf("query 均不匹配") >= 0,
@@ -98,7 +105,29 @@ setTimeout(() => {
       missBlock && missBlock.textContent
     );
     assert("命中的记录详情无未命中原因块", d.querySelectorAll(".mock-log-miss").length === 1);
-    console.log(`\nRESULT pass=${pass} fail=${fail}`);
-    process.exit(fail ? 1 : 0);
+
+    // 详情弹窗必须显示进来的完整请求端点（method + path + query）
+    const urlEl = d.querySelector(".mock-log-url");
+    assert(
+      "详情弹窗显示请求端点（含 query）",
+      !!urlEl && urlEl.textContent.indexOf("GET /api/x?a=1") >= 0,
+      urlEl && urlEl.textContent
+    );
+
+    // 兜底：无 url 字段的旧日志 -> 回退 path + query 仍正确显示
+    d.getElementById("mockLogModalClose").click();
+    setTimeout(() => {
+      rows[3].click();
+      setTimeout(() => {
+        const urlEl2 = d.querySelector(".mock-log-url");
+        assert(
+          "旧日志（无 url）回退显示端点",
+          !!urlEl2 && urlEl2.textContent.trim() === "DELETE /api/w",
+          urlEl2 && urlEl2.textContent
+        );
+        console.log(`\nRESULT pass=${pass} fail=${fail}`);
+        process.exit(fail ? 1 : 0);
+      }, 50);
+    }, 50);
   }, 50);
 }, 300);

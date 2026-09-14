@@ -109,6 +109,8 @@ setTimeout(() => {
 
     const listHtml = list.outerHTML;
     const head = document.querySelector("#panelMock .mock-dash-head").outerHTML;
+    const logsHead = document.querySelector(".mock-logs .mock-dash-head").outerHTML;
+    const logsList = document.getElementById("mockLogList").outerHTML;
 
     const out = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -133,12 +135,20 @@ body { background: var(--bg); margin: 0; padding: 24px; }
     <li>组头：<code>method + path</code> + 记录数 / query 数 + 「已默认 N 个 query」badge（按 query 各自默认，命中时返回各自默认）。</li>
     <li>query 子项：<code>query 字符串</code> + 记录数 + 「默认 状态码 · 摘要」一句话标识该 query 的默认条。</li>
     <li>记录卡：状态码 + 响应摘要 + 「默认/取消默认」「测试」「来源」按钮。点击卡头展开详情（请求体/返回体）。</li>
+    <li>处理记录栏（下方）：标题右侧新增 <b>「清空」</b> 按钮（无记录时禁用，点击二次确认后清空全部处理记录，不影响运行状态与命中计数）。</li>
   </ul>
 </div>
 <div class="preview-wrap">
   ${head}
   <div class="mock-dash">
     ${listHtml}
+  </div>
+</div>
+
+<div class="preview-wrap" style="margin-top:16px">
+  ${logsHead}
+  <div class="mock-dash">
+    ${logsList}
   </div>
 </div>
 <script>

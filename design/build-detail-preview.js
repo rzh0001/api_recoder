@@ -50,6 +50,13 @@ const REC = {
   annotations: { req: {}, res: {} },
 };
 
+const SAMPLE_COMPARE = JSON.stringify({
+  username: "admin",
+  password: "new-pass",
+  extra: { device: "pc" },
+  captcha: "9999",
+}, null, 2);
+
 const dom = new JSDOM(htmlWithScript, {
   runScripts: "dangerously",
   pretendToBeVisual: true,
@@ -91,9 +98,34 @@ setTimeout(() => {
   const overview = capture("overview");
   const request = capture("request");
   const response = capture("response");
+  // 用真实函数预填并渲染两个造数据弹窗（JSON 区统一组件预览），再收起后截图
+  window.openEditReq(REC);
+  window.openEditRes(REC);
+  d.getElementById("editReqModal").classList.add("hide");
+  d.getElementById("editResModal").classList.add("hide");
   const modals =
     d.getElementById("editReqModal").outerHTML + "\n" +
     d.getElementById("editResModal").outerHTML;
+
+  // 请求体最大化 + 右侧对比：填样例并真跑一次 diff，捕获带结果的弹窗
+  const reqTab = d.querySelector('.detail-tabs .tab[data-tab="request"]');
+  if (reqTab) reqTab.dispatchEvent(new window.Event("click", { bubbles: true }));
+  const reqBlock = Array.from(d.querySelectorAll("#detailBody .data-block")).find((b) => {
+    const t = b.querySelector(".db-title");
+    return t && t.textContent.trim() === "请求体";
+  });
+  if (reqBlock) {
+    const mx = reqBlock.querySelector(".db-max");
+    if (mx) mx.dispatchEvent(new window.Event("click", { bubbles: true }));
+    // 最大化后对比面板默认收起：点顶部「对比」展开，再粘贴样例跑一次真实 diff
+    d.getElementById("jsonMaxCompareBtn").dispatchEvent(new window.Event("click", { bubbles: true }));
+    d.getElementById("jsonMaxCompareInput").value = SAMPLE_COMPARE;
+    // 同时写进子文本，outerHTML 才能带走内容 —— 否则预览页里切模式无法重算对比
+    d.getElementById("jsonMaxCompareInput").textContent = SAMPLE_COMPARE;
+    d.getElementById("jsonMaxCompareRun").dispatchEvent(new window.Event("click", { bubbles: true }));
+  }
+  const maxModal = d.getElementById("jsonMaxModal").outerHTML;
+  d.getElementById("jsonMaxModal").classList.add("hide");
 
   const out = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -118,7 +150,12 @@ body { background: var(--bg); margin: 0; padding: 24px; }
 <div class="preview-note">
   <b>录制详情 · 统一数据块</b> —— 概览 / 请求 / 响应 三个 Tab。所有结构化数据（基本信息 / Query / 请求头 / 响应头 / Timing / 请求体 / 响应体）
   共用同一个「数据块」外壳：标题栏 + 复制全文 + 行号 + 逐行复制值。把鼠标移到任意一行，右侧会出现「复制」。
-  点头部 <b>✏ 编辑请求 / ✏ 编辑响应</b> 可查看两个造数据弹窗（仅视觉预览，保存不落库）。
+  点头部 <b>✏ 编辑请求 / ✏ 编辑响应</b> 可查看两个造数据弹窗：Headers / Body 已改用与详情页同一套 JSON 组件（可折叠、可复制、可最大化），
+  点弹窗里的 <b>预览 / 编辑原文</b> 切换（仅视觉预览，保存不落库）。
+  最大化请求体后，右侧是<b>同一套 JSON 组件</b>、与左侧等高并排；粘贴另一份 JSON 点「对比」，
+  可在 <b>按字段 / 按行</b> 两种模式间切换，差异直接高亮在左右两个 JSON 区里
+  （红=仅左侧 · 蓝=仅右侧 · 橙=值不同）。
+  <button id="pvShowMax" class="btn btn-sm" style="margin-left:8px">查看：请求体最大化 + 左右对比</button>
 </div>
 <div class="preview-wrap">
   ${head}
@@ -132,6 +169,7 @@ body { background: var(--bg); margin: 0; padding: 24px; }
   <div class="pv-pane" id="pane-response">${response}</div>
 </div>
 ${modals}
+${maxModal}
 <script>
 document.querySelectorAll(".pv-tab").forEach(function (t) {
   t.addEventListener("click", function () {
@@ -157,31 +195,8 @@ function copy(txt, btn) {
     ta.remove();
   }
 }
-var SAMPLE_REQ = {
-  url: "https://api.example.com/v1/login?from=web&t=1",
-  headers: { "Content-Type": "application/json", Authorization: "Bearer eyJhbGciOiJIUzI1NiJ9" },
-  body: '{"username":"admin","password":"123456"}'
-};
-var SAMPLE_RES = {
-  status: "200",
-  status_text: "OK",
-  headers: { "Content-Type": "application/json; charset=utf-8", "Set-Cookie": "sid=ab3f91c0; Path=/; HttpOnly" },
-  body: '{\n  "code": 0,\n  "data": { "token": "tk_001" },\n  "msg": "ok"\n}'
-};
 function closeModal(id) { document.getElementById(id).classList.add("hide"); }
 function openModal(id) { document.getElementById(id).classList.remove("hide"); }
-function fillModal(id, s) {
-  if (id === "editReqModal") {
-    document.getElementById("editReqUrl").value = s.url;
-    document.getElementById("editReqHeaders").value = JSON.stringify(s.headers, null, 2);
-    document.getElementById("editReqBody").value = s.body;
-  } else {
-    document.getElementById("editResStatus").value = s.status;
-    document.getElementById("editResStatusText").value = s.status_text;
-    document.getElementById("editResHeaders").value = JSON.stringify(s.headers, null, 2);
-    document.getElementById("editResBody").value = s.body;
-  }
-}
 ["editReqModal", "editResModal"].forEach(function (id) {
   var m = document.getElementById(id);
   var close = m.querySelector(".modal-close"), cancel = m.querySelector(".modal-actions .btn:not(.btn-primary)"), save = m.querySelector(".btn-primary");
@@ -196,8 +211,18 @@ function fillModal(id, s) {
   });
 });
 document.addEventListener("click", function (e) {
-  if (e.target.closest("#editReqBtn")) { fillModal("editReqModal", SAMPLE_REQ); openModal("editReqModal"); return; }
-  if (e.target.closest("#editResBtn")) { fillModal("editResModal", SAMPLE_RES); openModal("editResModal"); return; }
+  if (e.target.closest("#editReqBtn")) { openModal("editReqModal"); return; }
+  if (e.target.closest("#editResBtn")) { openModal("editResModal"); return; }
+  var jm = e.target.closest(".je-mode");
+  if (jm) {
+    var boxEl = jm.closest("[data-json-edit]");
+    var mode = jm.getAttribute("data-je-mode");
+    boxEl.querySelectorAll(".je-mode").forEach(function (x) { x.classList.toggle("is-active", x === jm); });
+    var ta = boxEl.querySelector("textarea"), pv = boxEl.querySelector(".json-edit-preview");
+    if (mode === "edit") { pv.classList.add("hide"); ta.classList.remove("hide"); }
+    else { pv.classList.remove("hide"); ta.classList.add("hide"); }
+    return;
+  }
   var b = e.target.closest("[data-copy-block]");
   if (b) {
     var holder = b.closest(".data-block").querySelector("[data-raw]");
@@ -207,17 +232,43 @@ document.addEventListener("click", function (e) {
   var v = e.target.closest("[data-copy-value]");
   if (v) { copy(v.getAttribute("data-copy-value"), v); return; }
   var f = e.target.closest(".json-fold");
-  if (f) {
-    var viewer = f.closest(".json-viewer");
-    var start = Number(f.getAttribute("data-start")), end = Number(f.getAttribute("data-end"));
-    var collapsed = f.classList.toggle("collapsed");
-    f.textContent = collapsed ? "▶" : "▼";
-    for (var i = start + 1; i < end; i++) {
-      var line = viewer.querySelector('.json-line[data-line="' + i + '"]');
-      if (line) line.classList.toggle("fold-hidden", collapsed);
-    }
-  }
+  if (f) { setFoldCollapsed(f, !f.classList.contains("collapsed")); return; }
 });
+
+// 最大化对比弹窗（静态预览）：显示 / 关闭 / 对比 / 清空
+// 对比引擎直接从 app.js 序列化过来（jsonCompareEngineSource），
+// 保证预览页行为与真实页面完全一致，不另抄一份逻辑。
+${window.jsonCompareEngineSource()}
+
+document.getElementById("pvShowMax").addEventListener("click", function () {
+  document.getElementById("jsonMaxModal").classList.remove("hide");
+});
+document.getElementById("jsonMaxClose").addEventListener("click", function () {
+  document.getElementById("jsonMaxModal").classList.add("hide");
+});
+document.getElementById("jsonMaxModal").addEventListener("click", function (e) {
+  if (e.target === this) this.classList.add("hide");
+});
+document.getElementById("jsonMaxCompareBtn").addEventListener("click", function () {
+  toggleCompare();
+});
+document.getElementById("jsonMaxCompareRun").addEventListener("click", function () {
+  if (showCompareJson()) runJsonCompare();
+});
+document.getElementById("jsonMaxCompareEdit").addEventListener("click", function () {
+  setComparePaneMode("edit");
+});
+document.getElementById("jsonMaxCompareClear").addEventListener("click", function () {
+  resetJsonCompare();
+});
+document.querySelectorAll("#jsonMaxBar .jm-mode").forEach(function (b) {
+  b.addEventListener("click", function () {
+    setCompareMode(b.getAttribute("data-jm-mode"));
+    var ta = document.getElementById("jsonMaxCompareInput");
+    if (ta.value.trim() && showCompareJson()) runJsonCompare();
+  });
+});
+linkCompareScroll();
 </script>
 </body>
 </html>`;

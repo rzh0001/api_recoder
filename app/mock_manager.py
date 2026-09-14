@@ -131,11 +131,14 @@ def _make_app(manager):
         # 记录处理日志（收到的请求 + 返回数据），供界面点击查看
         try:
             from . import state
+            _np = _norm(path) or "/"
+            _q = request.query_string.decode("utf-8", "replace")
             state.mock_manager.log_request({
                 "ts": time.time(),
                 "method": request.method,
-                "path": _norm(path) or "/",
-                "query": request.query_string.decode("utf-8", "replace"),
+                "path": _np,
+                "query": _q,
+                "url": _np + ("?" + _q if _q else ""),
                 "matched": bool(m),
                 "miss_reason": miss_reason if not m else None,
                 "status": status,
@@ -223,6 +226,11 @@ class MockManager:
         """返回处理记录（最新在前）。"""
         with self._lock:
             return list(reversed(self.logs))
+
+    def clear_logs(self):
+        """清空处理记录（不影响运行与命中计数）。"""
+        with self._lock:
+            self.logs = []
 
     @property
     def running(self):

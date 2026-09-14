@@ -803,13 +803,13 @@ mark.hl {
   overflow-wrap: normal;
 }
 /* 字段级注释（✎）：默认淡显，悬停该行时高亮 */
-.j-ann-btn {
+.j-ann-btn, .j-copy-btn {
   cursor: pointer; color: var(--muted);
   margin-left: 8px; font-size: 11px;
   opacity: .25; transition: opacity .1s ease, color .1s ease;
   -webkit-user-select: none; -moz-user-select: none; user-select: none;
 }
-.json-line:hover .j-ann-btn { opacity: 1; color: var(--primary); }
+.json-line:hover .j-ann-btn, .json-line:hover .j-copy-btn { opacity: 1; color: var(--primary); pointer-events: auto; }
 .j-ann-txt {
   color: #b8860b; margin-left: 6px;
   font-style: italic; font-size: 11px;
@@ -900,9 +900,56 @@ mark.hl {
 #jsonMaxModal .modal { width: 92vw; max-width: 1200px; max-height: 90vh; }
 #jsonMaxModal .modal-head { gap: 8px; }
 #jsonMaxModal .modal-body { max-height: 82vh; overflow: auto; padding: 10px 14px; }
+#jsonMaxModal .modal-body.json-max-body { max-height: none; overflow: hidden; }
 #jsonMaxBody { font-size: 13px; line-height: 1.5; }
 #jsonMaxBody .json-viewer, #jsonMaxBody .kv-viewer { width: 100%; }
-#jsonMaxBody .json-gutter { background: rgba(0,0,0,.03); }
+
+/* 最大化弹窗 · git-diff 式对比：顶部共享工具栏 + 左右等高两栏，滚动联动 */
+/* 左侧原 JSON，右侧对比结果（默认收起）；两栏等高，滚动时同步 */
+#jsonMaxCompareBtn.is-active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft-2); }
+.json-max-body { display: flex; flex-direction: column; gap: 8px; align-items: stretch; height: calc(90vh - 58px); max-height: 82vh; overflow: hidden; }
+.json-max-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.json-max-cols { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; align-items: stretch; }
+.json-max-main { flex: 1 1 50%; min-width: 0; min-height: 0; overflow: auto; }
+.json-max-compare {
+  flex: 1 1 50%; min-width: 0; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--border); padding-left: 12px;
+}
+.json-max-compare-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.jmc-title { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.jm-mode-group {
+  display: inline-flex; overflow: hidden;
+  border: 1px solid var(--border-strong); border-radius: var(--r-pill);
+}
+.jm-mode {
+  height: 22px; padding: 0 10px; cursor: pointer; border: none;
+  background: var(--surface); color: var(--text-2); font-size: 11.5px;
+}
+.jm-mode + .jm-mode { border-left: 1px solid var(--border-strong); }
+.jm-mode:hover { color: var(--accent); }
+.jm-mode.is-active { background: var(--primary); color: #fff; }
+.jmc-stat { font-size: 11px; color: var(--muted); }
+.json-max-bar .jmc-stat { flex-basis: 100%; }
+.jmc-stat.ok { color: var(--accent-strong); }
+.jmc-stat.warn { color: var(--warning); }
+.json-max-compare-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.json-max-compare-input {
+  flex: 1 1 auto; min-height: 0; width: 100%; box-sizing: border-box; resize: none;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: 8px 10px; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 12px; line-height: 1.5; color: var(--text); background: var(--code-bg);
+}
+.json-max-compare-view { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.json-max-compare-view .json-viewer { width: 100%; }
+
+/* 差异高亮：直接落在 JSON 区的行上（左/右各自标记） */
+.json-line.diff-add .json-gutter, .json-line.diff-add .json-code { background: rgba(47,139,224,.13); }
+.json-line.diff-del .json-gutter, .json-line.diff-del .json-code { background: rgba(226,72,59,.13); }
+.json-line.diff-mod .json-gutter, .json-line.diff-mod .json-code { background: rgba(224,138,0,.16); }
+.json-line.diff-add .json-gutter { border-left: 3px solid var(--info); padding-left: 1px; }
+.json-line.diff-del .json-gutter { border-left: 3px solid var(--danger); padding-left: 1px; }
+.json-line.diff-mod .json-gutter { border-left: 3px solid var(--warning); padding-left: 1px; }
 
 /* 标签编辑器：固定在详情顶部，仅标签，紧凑 */
 .detail-tags {
@@ -935,6 +982,31 @@ mark.hl {
 .edit-res-status-row { display: flex; gap: 8px; margin-bottom: 12px; }
 .edit-res-status-row .input { flex: 1 1 auto; min-width: 0; }
 .edit-res-status-row .edit-res-status { flex: 0 0 88px; }
+
+/* JSON 编辑区：与详情页同一套 JSON 组件（预览）+ 原文编辑 双模式 */
+.json-edit {
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--surface); overflow: hidden; margin-bottom: 12px;
+}
+.json-edit-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.je-mode {
+  height: 24px; padding: 0 12px; cursor: pointer;
+  border: 1px solid var(--border-strong); border-radius: var(--r-pill);
+  background: var(--surface); color: var(--text-2); font-size: 12px;
+}
+.je-mode:hover { border-color: var(--accent); color: var(--accent); }
+.je-mode.is-active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.je-hint { margin-left: auto; font-size: 11px; color: var(--muted); }
+.json-edit-preview { max-height: 340px; overflow: auto; }
+.json-edit-preview .code-wrap { margin: 0; }
+.json-edit-preview .json-viewer { border-radius: 0; }
+.json-edit textarea { border: none; border-radius: 0; margin: 0; min-height: 180px; }
+.json-edit textarea:focus { outline: none; }
+.json-edit-empty { padding: 12px; color: var(--muted); font-size: 12px; font-style: italic; }
 .modal-tip { font-weight: 400; color: var(--muted); font-size: 11px; margin-left: 6px; }
 .modal-error { color: #A32D2D; font-size: 12px; min-height: 16px; margin: -4px 0 8px; }
 .modal-actions { display: flex; gap: 8px; }
@@ -1339,7 +1411,12 @@ body { background: var(--bg); margin: 0; padding: 24px; }
 <div class="preview-note">
   <b>录制详情 · 统一数据块</b> —— 概览 / 请求 / 响应 三个 Tab。所有结构化数据（基本信息 / Query / 请求头 / 响应头 / Timing / 请求体 / 响应体）
   共用同一个「数据块」外壳：标题栏 + 复制全文 + 行号 + 逐行复制值。把鼠标移到任意一行，右侧会出现「复制」。
-  点头部 <b>✏ 编辑请求 / ✏ 编辑响应</b> 可查看两个造数据弹窗（仅视觉预览，保存不落库）。
+  点头部 <b>✏ 编辑请求 / ✏ 编辑响应</b> 可查看两个造数据弹窗：Headers / Body 已改用与详情页同一套 JSON 组件（可折叠、可复制、可最大化），
+  点弹窗里的 <b>预览 / 编辑原文</b> 切换（仅视觉预览，保存不落库）。
+  最大化请求体后，右侧是<b>同一套 JSON 组件</b>、与左侧等高并排；粘贴另一份 JSON 点「对比」，
+  可在 <b>按字段 / 按行</b> 两种模式间切换，差异直接高亮在左右两个 JSON 区里
+  （红=仅左侧 · 蓝=仅右侧 · 橙=值不同）。
+  <button id="pvShowMax" class="btn btn-sm" style="margin-left:8px">查看：请求体最大化 + 左右对比</button>
 </div>
 <div class="preview-wrap">
   <div class="detail-head"><div class="detail-title">POST https://api.example.com/v1/login?from=web&amp;t=1 <button class="btn-mini" data-copy-url="" title="复制完整请求地址">📋 复制</button><button class="btn-mini" id="editReqBtn" title="编辑请求（URL / 请求头 / 请求体），用于造数据">✏ 编辑请求</button><button class="btn-mini" id="editResBtn" title="编辑响应（状态码 / 响应头 / 响应体），用于造数据">✏ 编辑响应</button><button class="btn-mini" id="gotoLibBtn" title="在请求库中查看该接口的完整文档">📚 请求库</button><button class="btn-mini" id="pinMockBtn" title="把这条响应固定为 Mock 默认返回">📌 固定到 Mock</button><button class="btn-mini" id="downloadFileBtn" title="将响应体另存为文件">⬇ 下载文件</button><button class="btn-mini" id="delDetailBtn" title="删除该条录制记录">🗑 删除</button></div><div class="detail-meta">状态 <span class="s-2">200</span> · 类型 XHR · 大小 256 B · 耗时 123ms<br>域 example.com · host api.example.com</div></div>
@@ -1385,7 +1462,7 @@ body { background: var(--bg); margin: 0; padding: 24px; }
     &quot;device&quot;: &quot;pc&quot;,
     &quot;ip&quot;: &quot;10.0.0.7&quot;
   }
-}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"username"</span><span class="j-punc">:</span> <span class="j-string">"admin"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="username" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"password"</span><span class="j-punc">:</span> <span class="j-string">"123456"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="password" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">  <span class="j-key">"remember"</span><span class="j-punc">:</span> <span class="j-boolean">true</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="remember" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-fold" data-start="5" data-end="8">▼</span><span class="json-lineno">5</span></span><span class="json-code">  <span class="j-key">"extra"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "device": "pc",... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="6"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">    <span class="j-key">"device"</span><span class="j-punc">:</span> <span class="j-string">"pc"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra.device" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="7"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code">    <span class="j-key">"ip"</span><span class="j-punc">:</span> <span class="j-string">"10.0.0.7"</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra.ip" data-ann-target="req" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="8"><span class="json-gutter"><span class="json-lineno">8</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="9"><span class="json-gutter"><span class="json-lineno">9</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div></div>
+}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-fold" data-start="1" data-end="9">▼</span><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span><span class="json-collapsed-preview"> "username": "admin",... }</span></span></div><div class="json-line" data-line="2" data-path="username"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"username"</span><span class="j-punc">:</span> <span class="j-string">"admin"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="username" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="username" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="3" data-path="password"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"password"</span><span class="j-punc">:</span> <span class="j-string">"123456"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="password" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="password" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="4" data-path="remember"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">  <span class="j-key">"remember"</span><span class="j-punc">:</span> <span class="j-boolean">true</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="remember" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="remember" title="复制该字段值">⧉</span></span></div><div class="json-line fold-collapsed" data-line="5" data-path="extra"><span class="json-gutter"><span class="json-fold collapsed" data-start="5" data-end="8">▶</span><span class="json-lineno">5</span></span><span class="json-code">  <span class="j-key">"extra"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "device": "pc",... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="extra" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="6" data-path="extra.device"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">    <span class="j-key">"device"</span><span class="j-punc">:</span> <span class="j-string">"pc"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra.device" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="extra.device" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="7" data-path="extra.ip"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code">    <span class="j-key">"ip"</span><span class="j-punc">:</span> <span class="j-string">"10.0.0.7"</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra.ip" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="extra.ip" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="8"><span class="json-gutter"><span class="json-lineno">8</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="9"><span class="json-gutter"><span class="json-lineno">9</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div></div>
   <div class="pv-pane" id="pane-response"><div class="data-block db-json"><div class="db-head"><span class="db-title">响应体</span><span class="db-meta">20 行</span><span class="db-spacer"></span><button class="btn-mini db-copy" data-copy-block="">复制</button><button class="btn-mini db-max" data-max="" title="最大化查看">⛶</button></div><div class="db-body"><div class="json-viewer code" data-raw="{
   &quot;code&quot;: 0,
   &quot;msg&quot;: &quot;ok&quot;,
@@ -1405,7 +1482,7 @@ body { background: var(--bg); margin: 0; padding: 24px; }
       }
     }
   }
-}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-lineno"> 1</span></span><span class="json-code"><span class="j-punc">{</span></span></div><div class="json-line" data-line="2"><span class="json-gutter"><span class="json-lineno"> 2</span></span><span class="json-code">  <span class="j-key">"code"</span><span class="j-punc">:</span> <span class="j-number">0</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="code" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="3"><span class="json-gutter"><span class="json-lineno"> 3</span></span><span class="json-code">  <span class="j-key">"msg"</span><span class="j-punc">:</span> <span class="j-string">"ok"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="msg" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="4"><span class="json-gutter"><span class="json-fold" data-start="4" data-end="19">▼</span><span class="json-lineno"> 4</span></span><span class="json-code">  <span class="j-key">"data"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "token": "tk_001",... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno"> 5</span></span><span class="json-code">    <span class="j-key">"token"</span><span class="j-punc">:</span> <span class="j-string">"tk_001"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.token" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="6"><span class="json-gutter"><span class="json-lineno"> 6</span></span><span class="json-code">    <span class="j-key">"expire"</span><span class="j-punc">:</span> <span class="j-number">7200</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.expire" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="7"><span class="json-gutter"><span class="json-fold" data-start="7" data-end="18">▼</span><span class="json-lineno"> 7</span></span><span class="json-code">    <span class="j-key">"user"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "id": 7,... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="8"><span class="json-gutter"><span class="json-lineno"> 8</span></span><span class="json-code">      <span class="j-key">"id"</span><span class="j-punc">:</span> <span class="j-number">7</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.id" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="9"><span class="json-gutter"><span class="json-lineno"> 9</span></span><span class="json-code">      <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"张三"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.name" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="10"><span class="json-gutter"><span class="json-fold" data-start="10" data-end="13">▼</span><span class="json-lineno">10</span></span><span class="json-code">      <span class="j-key">"roles"</span><span class="j-punc">:</span> <span class="j-punc">[</span><span class="json-collapsed-preview"> "admin",... ],</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.roles" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="11"><span class="json-gutter"><span class="json-lineno">11</span></span><span class="json-code">        <span class="j-string">"admin"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.roles.0" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="12"><span class="json-gutter"><span class="json-lineno">12</span></span><span class="json-code">        <span class="j-string">"operator"</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.roles.1" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="13"><span class="json-gutter"><span class="json-lineno">13</span></span><span class="json-code">      <span class="j-punc">]</span><span class="j-punc">,</span></span></div><div class="json-line" data-line="14"><span class="json-gutter"><span class="json-fold" data-start="14" data-end="17">▼</span><span class="json-lineno">14</span></span><span class="json-code">      <span class="j-key">"dept"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "id": 3,... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.dept" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="15"><span class="json-gutter"><span class="json-lineno">15</span></span><span class="json-code">        <span class="j-key">"id"</span><span class="j-punc">:</span> <span class="j-number">3</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.dept.id" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="16"><span class="json-gutter"><span class="json-lineno">16</span></span><span class="json-code">        <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"技术科"</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.dept.name" data-ann-target="res" title="添加/编辑注释">✎</span></span></div><div class="json-line" data-line="17"><span class="json-gutter"><span class="json-lineno">17</span></span><span class="json-code">      <span class="j-punc">}</span></span></div><div class="json-line" data-line="18"><span class="json-gutter"><span class="json-lineno">18</span></span><span class="json-code">    <span class="j-punc">}</span></span></div><div class="json-line" data-line="19"><span class="json-gutter"><span class="json-lineno">19</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="20"><span class="json-gutter"><span class="json-lineno">20</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div></div>
+}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-fold" data-start="1" data-end="20">▼</span><span class="json-lineno"> 1</span></span><span class="json-code"><span class="j-punc">{</span><span class="json-collapsed-preview"> "code": 0,... }</span></span></div><div class="json-line" data-line="2" data-path="code"><span class="json-gutter"><span class="json-lineno"> 2</span></span><span class="json-code">  <span class="j-key">"code"</span><span class="j-punc">:</span> <span class="j-number">0</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="code" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="code" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="3" data-path="msg"><span class="json-gutter"><span class="json-lineno"> 3</span></span><span class="json-code">  <span class="j-key">"msg"</span><span class="j-punc">:</span> <span class="j-string">"ok"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="msg" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="msg" title="复制该字段值">⧉</span></span></div><div class="json-line fold-collapsed" data-line="4" data-path="data"><span class="json-gutter"><span class="json-fold collapsed" data-start="4" data-end="19">▶</span><span class="json-lineno"> 4</span></span><span class="json-code">  <span class="j-key">"data"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "token": "tk_001",... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="5" data-path="data.token"><span class="json-gutter"><span class="json-lineno"> 5</span></span><span class="json-code">    <span class="j-key">"token"</span><span class="j-punc">:</span> <span class="j-string">"tk_001"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.token" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.token" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="6" data-path="data.expire"><span class="json-gutter"><span class="json-lineno"> 6</span></span><span class="json-code">    <span class="j-key">"expire"</span><span class="j-punc">:</span> <span class="j-number">7200</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.expire" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.expire" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden fold-collapsed" data-line="7" data-path="data.user"><span class="json-gutter"><span class="json-fold collapsed" data-start="7" data-end="18">▶</span><span class="json-lineno"> 7</span></span><span class="json-code">    <span class="j-key">"user"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "id": 7,... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.user" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="8" data-path="data.user.id"><span class="json-gutter"><span class="json-lineno"> 8</span></span><span class="json-code">      <span class="j-key">"id"</span><span class="j-punc">:</span> <span class="j-number">7</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.id" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.user.id" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="9" data-path="data.user.name"><span class="json-gutter"><span class="json-lineno"> 9</span></span><span class="json-code">      <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"张三"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.name" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.user.name" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden fold-collapsed" data-line="10" data-path="data.user.roles"><span class="json-gutter"><span class="json-fold collapsed" data-start="10" data-end="13">▶</span><span class="json-lineno">10</span></span><span class="json-code">      <span class="j-key">"roles"</span><span class="j-punc">:</span> <span class="j-punc">[</span><span class="json-collapsed-preview"> "admin",... ],</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.roles" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.user.roles" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="11" data-path="data.user.roles.0"><span class="json-gutter"><span class="json-lineno">11</span></span><span class="json-code">        <span class="j-string">"admin"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.roles.0" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.user.roles.0" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="12" data-path="data.user.roles.1"><span class="json-gutter"><span class="json-lineno">12</span></span><span class="json-code">        <span class="j-string">"operator"</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.roles.1" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.user.roles.1" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="13"><span class="json-gutter"><span class="json-lineno">13</span></span><span class="json-code">      <span class="j-punc">]</span><span class="j-punc">,</span></span></div><div class="json-line fold-hidden fold-collapsed" data-line="14" data-path="data.user.dept"><span class="json-gutter"><span class="json-fold collapsed" data-start="14" data-end="17">▶</span><span class="json-lineno">14</span></span><span class="json-code">      <span class="j-key">"dept"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "id": 3,... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.dept" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.user.dept" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="15" data-path="data.user.dept.id"><span class="json-gutter"><span class="json-lineno">15</span></span><span class="json-code">        <span class="j-key">"id"</span><span class="j-punc">:</span> <span class="j-number">3</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.dept.id" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.user.dept.id" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="16" data-path="data.user.dept.name"><span class="json-gutter"><span class="json-lineno">16</span></span><span class="json-code">        <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"技术科"</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="data.user.dept.name" data-ann-target="res" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="data.user.dept.name" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="17"><span class="json-gutter"><span class="json-lineno">17</span></span><span class="json-code">      <span class="j-punc">}</span></span></div><div class="json-line fold-hidden" data-line="18"><span class="json-gutter"><span class="json-lineno">18</span></span><span class="json-code">    <span class="j-punc">}</span></span></div><div class="json-line fold-hidden" data-line="19"><span class="json-gutter"><span class="json-lineno">19</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="20"><span class="json-gutter"><span class="json-lineno">20</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div></div>
 </div>
 <div id="editReqModal" class="modal-mask hide">
     <div class="modal modal-lg">
@@ -1417,9 +1494,37 @@ body { background: var(--bg); margin: 0; padding: 24px; }
         <div class="modal-subtitle">请求地址 URL<span class="modal-tip">（改末尾的 ID / 路径即可造不同数据）</span></div>
         <textarea id="editReqUrl" class="edit-req-url" placeholder="http://host/path/..."></textarea>
         <div class="modal-subtitle">请求头 Headers（JSON 对象）</div>
-        <textarea id="editReqHeaders" class="edit-req-headers" placeholder="{&quot;Content-Type&quot;:&quot;application/json&quot;}"></textarea>
+        <div class="json-edit" data-json-edit="">
+          <div class="json-edit-bar">
+            <button type="button" class="je-mode is-active" data-je-mode="preview">预览</button>
+            <button type="button" class="je-mode" data-je-mode="edit">编辑原文</button>
+            <span class="je-hint">JSON 对象</span>
+          </div>
+          <div class="json-edit-preview"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="{
+  &quot;Content-Type&quot;: &quot;application/json&quot;,
+  &quot;Authorization&quot;: &quot;Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjd9&quot;,
+  &quot;X-Trace-Id&quot;: &quot;8f2c1a90b3&quot;
+}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-fold" data-start="1" data-end="5">▼</span><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span><span class="json-collapsed-preview"> "Content-Type": "application/json",... }</span></span></div><div class="json-line" data-line="2" data-path="Content-Type"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"Content-Type"</span><span class="j-punc">:</span> <span class="j-string">"application/json"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="Content-Type" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="3" data-path="Authorization"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"Authorization"</span><span class="j-punc">:</span> <span class="j-string">"Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjd9"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="Authorization" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="4" data-path="X-Trace-Id"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">  <span class="j-key">"X-Trace-Id"</span><span class="j-punc">:</span> <span class="j-string">"8f2c1a90b3"</span><span class="j-copy-btn" data-copy-json-path="X-Trace-Id" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno">5</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div>
+          <textarea id="editReqHeaders" class="edit-req-headers hide" placeholder="{&quot;Content-Type&quot;:&quot;application/json&quot;}"></textarea>
+        </div>
         <div class="modal-subtitle">请求体 Body</div>
-        <textarea id="editReqBody" class="edit-req-body" placeholder="请求体原文（可为 JSON / 表单 / 任意文本）"></textarea>
+        <div class="json-edit" data-json-edit="">
+          <div class="json-edit-bar">
+            <button type="button" class="je-mode is-active" data-je-mode="preview">预览</button>
+            <button type="button" class="je-mode" data-je-mode="edit">编辑原文</button>
+            <span class="je-hint">JSON / 文本</span>
+          </div>
+          <div class="json-edit-preview"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="{
+  &quot;username&quot;: &quot;admin&quot;,
+  &quot;password&quot;: &quot;123456&quot;,
+  &quot;remember&quot;: true,
+  &quot;extra&quot;: {
+    &quot;device&quot;: &quot;pc&quot;,
+    &quot;ip&quot;: &quot;10.0.0.7&quot;
+  }
+}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-fold" data-start="1" data-end="9">▼</span><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span><span class="json-collapsed-preview"> "username": "admin",... }</span></span></div><div class="json-line" data-line="2" data-path="username"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"username"</span><span class="j-punc">:</span> <span class="j-string">"admin"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="username" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="3" data-path="password"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"password"</span><span class="j-punc">:</span> <span class="j-string">"123456"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="password" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="4" data-path="remember"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">  <span class="j-key">"remember"</span><span class="j-punc">:</span> <span class="j-boolean">true</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="remember" title="复制该字段值">⧉</span></span></div><div class="json-line fold-collapsed" data-line="5" data-path="extra"><span class="json-gutter"><span class="json-fold collapsed" data-start="5" data-end="8">▶</span><span class="json-lineno">5</span></span><span class="json-code">  <span class="j-key">"extra"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "device": "pc",... }</span><span class="j-copy-btn" data-copy-json-path="extra" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="6" data-path="extra.device"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">    <span class="j-key">"device"</span><span class="j-punc">:</span> <span class="j-string">"pc"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="extra.device" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="7" data-path="extra.ip"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code">    <span class="j-key">"ip"</span><span class="j-punc">:</span> <span class="j-string">"10.0.0.7"</span><span class="j-copy-btn" data-copy-json-path="extra.ip" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="8"><span class="json-gutter"><span class="json-lineno">8</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="9"><span class="json-gutter"><span class="json-lineno">9</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div>
+          <textarea id="editReqBody" class="edit-req-body hide" placeholder="请求体原文（可为 JSON / 表单 / 任意文本）"></textarea>
+        </div>
         <div id="editReqErr" class="modal-error"></div>
         <div class="modal-actions">
           <button id="editReqSave" class="btn btn-primary">保存修改</button>
@@ -1442,15 +1547,110 @@ body { background: var(--bg); margin: 0; padding: 24px; }
           <input id="editResStatusText" class="input" placeholder="状态文本（可选，如 OK / Not Found）">
         </div>
         <div class="modal-subtitle">响应头 Headers（JSON 对象）</div>
-        <textarea id="editResHeaders" class="edit-res-headers" placeholder="{&quot;Content-Type&quot;:&quot;application/json&quot;}"></textarea>
+        <div class="json-edit" data-json-edit="">
+          <div class="json-edit-bar">
+            <button type="button" class="je-mode is-active" data-je-mode="preview">预览</button>
+            <button type="button" class="je-mode" data-je-mode="edit">编辑原文</button>
+            <span class="je-hint">JSON 对象</span>
+          </div>
+          <div class="json-edit-preview"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="{
+  &quot;Content-Type&quot;: &quot;application/json; charset=utf-8&quot;,
+  &quot;Set-Cookie&quot;: &quot;sid=ab3f91c0; Path=/; HttpOnly&quot;,
+  &quot;Cache-Control&quot;: &quot;no-store&quot;
+}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-fold" data-start="1" data-end="5">▼</span><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span><span class="json-collapsed-preview"> "Content-Type": "application/json; chars... }</span></span></div><div class="json-line" data-line="2" data-path="Content-Type"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"Content-Type"</span><span class="j-punc">:</span> <span class="j-string">"application/json; charset=utf-8"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="Content-Type" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="3" data-path="Set-Cookie"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"Set-Cookie"</span><span class="j-punc">:</span> <span class="j-string">"sid=ab3f91c0; Path=/; HttpOnly"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="Set-Cookie" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="4" data-path="Cache-Control"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">  <span class="j-key">"Cache-Control"</span><span class="j-punc">:</span> <span class="j-string">"no-store"</span><span class="j-copy-btn" data-copy-json-path="Cache-Control" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="5"><span class="json-gutter"><span class="json-lineno">5</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div>
+          <textarea id="editResHeaders" class="edit-res-headers hide" placeholder="{&quot;Content-Type&quot;:&quot;application/json&quot;}"></textarea>
+        </div>
         <div class="modal-subtitle">响应体 Body</div>
-        <textarea id="editResBody" class="edit-res-body" placeholder="响应体原文（可为 JSON / HTML / 任意文本）"></textarea>
+        <div class="json-edit" data-json-edit="">
+          <div class="json-edit-bar">
+            <button type="button" class="je-mode is-active" data-je-mode="preview">预览</button>
+            <button type="button" class="je-mode" data-je-mode="edit">编辑原文</button>
+            <span class="je-hint">JSON / 文本</span>
+          </div>
+          <div class="json-edit-preview"><div class="code-wrap"><span class="code-tools"><button class="btn-mini code-copy" data-copy="">复制</button><button class="btn-mini code-max" data-max="" title="最大化查看">⛶</button></span><div class="json-viewer code" data-raw="{
+  &quot;code&quot;: 0,
+  &quot;msg&quot;: &quot;ok&quot;,
+  &quot;data&quot;: {
+    &quot;token&quot;: &quot;tk_001&quot;,
+    &quot;expire&quot;: 7200,
+    &quot;user&quot;: {
+      &quot;id&quot;: 7,
+      &quot;name&quot;: &quot;张三&quot;,
+      &quot;roles&quot;: [
+        &quot;admin&quot;,
+        &quot;operator&quot;
+      ],
+      &quot;dept&quot;: {
+        &quot;id&quot;: 3,
+        &quot;name&quot;: &quot;技术科&quot;
+      }
+    }
+  }
+}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-fold" data-start="1" data-end="20">▼</span><span class="json-lineno"> 1</span></span><span class="json-code"><span class="j-punc">{</span><span class="json-collapsed-preview"> "code": 0,... }</span></span></div><div class="json-line" data-line="2" data-path="code"><span class="json-gutter"><span class="json-lineno"> 2</span></span><span class="json-code">  <span class="j-key">"code"</span><span class="j-punc">:</span> <span class="j-number">0</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="code" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="3" data-path="msg"><span class="json-gutter"><span class="json-lineno"> 3</span></span><span class="json-code">  <span class="j-key">"msg"</span><span class="j-punc">:</span> <span class="j-string">"ok"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="msg" title="复制该字段值">⧉</span></span></div><div class="json-line fold-collapsed" data-line="4" data-path="data"><span class="json-gutter"><span class="json-fold collapsed" data-start="4" data-end="19">▶</span><span class="json-lineno"> 4</span></span><span class="json-code">  <span class="j-key">"data"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "token": "tk_001",... }</span><span class="j-copy-btn" data-copy-json-path="data" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="5" data-path="data.token"><span class="json-gutter"><span class="json-lineno"> 5</span></span><span class="json-code">    <span class="j-key">"token"</span><span class="j-punc">:</span> <span class="j-string">"tk_001"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="data.token" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="6" data-path="data.expire"><span class="json-gutter"><span class="json-lineno"> 6</span></span><span class="json-code">    <span class="j-key">"expire"</span><span class="j-punc">:</span> <span class="j-number">7200</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="data.expire" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden fold-collapsed" data-line="7" data-path="data.user"><span class="json-gutter"><span class="json-fold collapsed" data-start="7" data-end="18">▶</span><span class="json-lineno"> 7</span></span><span class="json-code">    <span class="j-key">"user"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "id": 7,... }</span><span class="j-copy-btn" data-copy-json-path="data.user" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="8" data-path="data.user.id"><span class="json-gutter"><span class="json-lineno"> 8</span></span><span class="json-code">      <span class="j-key">"id"</span><span class="j-punc">:</span> <span class="j-number">7</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="data.user.id" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="9" data-path="data.user.name"><span class="json-gutter"><span class="json-lineno"> 9</span></span><span class="json-code">      <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"张三"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="data.user.name" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden fold-collapsed" data-line="10" data-path="data.user.roles"><span class="json-gutter"><span class="json-fold collapsed" data-start="10" data-end="13">▶</span><span class="json-lineno">10</span></span><span class="json-code">      <span class="j-key">"roles"</span><span class="j-punc">:</span> <span class="j-punc">[</span><span class="json-collapsed-preview"> "admin",... ],</span><span class="j-copy-btn" data-copy-json-path="data.user.roles" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="11" data-path="data.user.roles.0"><span class="json-gutter"><span class="json-lineno">11</span></span><span class="json-code">        <span class="j-string">"admin"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="data.user.roles.0" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="12" data-path="data.user.roles.1"><span class="json-gutter"><span class="json-lineno">12</span></span><span class="json-code">        <span class="j-string">"operator"</span><span class="j-copy-btn" data-copy-json-path="data.user.roles.1" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="13"><span class="json-gutter"><span class="json-lineno">13</span></span><span class="json-code">      <span class="j-punc">]</span><span class="j-punc">,</span></span></div><div class="json-line fold-hidden fold-collapsed" data-line="14" data-path="data.user.dept"><span class="json-gutter"><span class="json-fold collapsed" data-start="14" data-end="17">▶</span><span class="json-lineno">14</span></span><span class="json-code">      <span class="j-key">"dept"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "id": 3,... }</span><span class="j-copy-btn" data-copy-json-path="data.user.dept" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="15" data-path="data.user.dept.id"><span class="json-gutter"><span class="json-lineno">15</span></span><span class="json-code">        <span class="j-key">"id"</span><span class="j-punc">:</span> <span class="j-number">3</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="data.user.dept.id" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="16" data-path="data.user.dept.name"><span class="json-gutter"><span class="json-lineno">16</span></span><span class="json-code">        <span class="j-key">"name"</span><span class="j-punc">:</span> <span class="j-string">"技术科"</span><span class="j-copy-btn" data-copy-json-path="data.user.dept.name" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="17"><span class="json-gutter"><span class="json-lineno">17</span></span><span class="json-code">      <span class="j-punc">}</span></span></div><div class="json-line fold-hidden" data-line="18"><span class="json-gutter"><span class="json-lineno">18</span></span><span class="json-code">    <span class="j-punc">}</span></span></div><div class="json-line fold-hidden" data-line="19"><span class="json-gutter"><span class="json-lineno">19</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="20"><span class="json-gutter"><span class="json-lineno">20</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div></div>
+          <textarea id="editResBody" class="edit-res-body hide" placeholder="响应体原文（可为 JSON / HTML / 任意文本）"></textarea>
+        </div>
         <div id="editResErr" class="modal-error"></div>
         <div class="modal-actions">
           <button id="editResSave" class="btn btn-primary">保存修改</button>
           <button id="editResCancel" class="btn">取消</button>
         </div>
         <div class="modal-hint">修改会写回本条记录，导出 HAR/JSON 与 Mock 都会用新值；Mock 运行中改完也立即生效。</div>
+      </div>
+    </div>
+  </div>
+<div id="jsonMaxModal" class="modal-mask">
+    <div class="modal">
+      <div class="modal-head">
+        <span class="modal-title" id="jsonMaxTitle">请求体</span>
+        <span class="db-spacer"></span>
+        <button id="jsonMaxCompareBtn" class="btn btn-sm is-active" title="展开对比：与另一份 JSON 比对差异">收起对比</button>
+        <button id="jsonMaxCopy" class="btn btn-sm" title="复制全部内容">复制</button>
+        <button id="jsonMaxClose" class="modal-close" title="关闭（Esc）">×</button>
+      </div>
+      <div class="modal-body json-max-body">
+        <div class="json-max-bar" id="jsonMaxBar">
+          <span class="jmc-title">对比</span>
+          <span class="jm-mode-group">
+            <button class="jm-mode is-active" data-jm-mode="field" title="按字段路径对比：忽略缩进与字段顺序，只比字段本身">按字段</button>
+            <button class="jm-mode" data-jm-mode="line" title="严格按行对比：逐行比文本，缩进不同也算差异">按行</button>
+          </span>
+          <span class="db-spacer"></span>
+          <button id="jsonMaxCompareEdit" class="btn btn-sm" title="回到原文重新粘贴/修改">编辑原文</button>
+          <button id="jsonMaxCompareClear" class="btn btn-sm" title="清空对比内容">清空</button>
+          <button id="jsonMaxCompareRun" class="btn btn-sm btn-primary">对比</button>
+          <div class="jmc-stat" id="jsonMaxCompareStat">共 4 处差异：仅左侧 2 · 仅右侧 1 · 值不同 1</div>
+        </div>
+        <div class="json-max-cols">
+          <div class="json-max-main" id="jsonMaxBody"><div class="json-viewer code" data-raw="{
+  &quot;username&quot;: &quot;admin&quot;,
+  &quot;password&quot;: &quot;123456&quot;,
+  &quot;remember&quot;: true,
+  &quot;extra&quot;: {
+    &quot;device&quot;: &quot;pc&quot;,
+    &quot;ip&quot;: &quot;10.0.0.7&quot;
+  }
+}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-fold" data-start="1" data-end="9">▼</span><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span><span class="json-collapsed-preview"> "username": "admin",... }</span></span></div><div class="json-line" data-line="2" data-path="username"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"username"</span><span class="j-punc">:</span> <span class="j-string">"admin"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="username" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="username" title="复制该字段值">⧉</span></span></div><div class="json-line diff-mod" data-line="3" data-path="password"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"password"</span><span class="j-punc">:</span> <span class="j-string">"123456"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="password" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="password" title="复制该字段值">⧉</span></span></div><div class="json-line diff-del" data-line="4" data-path="remember"><span class="json-gutter"><span class="json-lineno">4</span></span><span class="json-code">  <span class="j-key">"remember"</span><span class="j-punc">:</span> <span class="j-boolean">true</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="remember" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="remember" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="5" data-path="extra"><span class="json-gutter"><span class="json-fold" data-start="5" data-end="8">▼</span><span class="json-lineno">5</span></span><span class="json-code">  <span class="j-key">"extra"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "device": "pc",... }</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="extra" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="6" data-path="extra.device"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">    <span class="j-key">"device"</span><span class="j-punc">:</span> <span class="j-string">"pc"</span><span class="j-punc">,</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra.device" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="extra.device" title="复制该字段值">⧉</span></span></div><div class="json-line diff-del" data-line="7" data-path="extra.ip"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code">    <span class="j-key">"ip"</span><span class="j-punc">:</span> <span class="j-string">"10.0.0.7"</span><span class="j-ann-btn" data-ann-seq="1" data-ann-path="extra.ip" data-ann-target="req" title="添加/编辑注释">✎</span><span class="j-copy-btn" data-copy-json-path="extra.ip" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="8"><span class="json-gutter"><span class="json-lineno">8</span></span><span class="json-code">  <span class="j-punc">}</span></span></div><div class="json-line" data-line="9"><span class="json-gutter"><span class="json-lineno">9</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div>
+          <div class="json-max-compare" id="jsonMaxCompare">
+            <div class="json-max-compare-body">
+              <textarea id="jsonMaxCompareInput" class="json-max-compare-input hide" placeholder="在此粘贴另一份 JSON，点「对比」查看差异（差异会在左右两个 JSON 区高亮）">{
+  "username": "admin",
+  "password": "new-pass",
+  "extra": {
+    "device": "pc"
+  },
+  "captcha": "9999"
+}</textarea>
+              <div class="json-max-compare-view" id="jsonMaxCompareView"><div class="json-viewer code" data-raw="{
+  &quot;username&quot;: &quot;admin&quot;,
+  &quot;password&quot;: &quot;new-pass&quot;,
+  &quot;extra&quot;: {
+    &quot;device&quot;: &quot;pc&quot;
+  },
+  &quot;captcha&quot;: &quot;9999&quot;
+}"><div class="json-line" data-line="1"><span class="json-gutter"><span class="json-fold" data-start="1" data-end="8">▼</span><span class="json-lineno">1</span></span><span class="json-code"><span class="j-punc">{</span><span class="json-collapsed-preview"> "username": "admin",... }</span></span></div><div class="json-line" data-line="2" data-path="username"><span class="json-gutter"><span class="json-lineno">2</span></span><span class="json-code">  <span class="j-key">"username"</span><span class="j-punc">:</span> <span class="j-string">"admin"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="username" title="复制该字段值">⧉</span></span></div><div class="json-line diff-mod" data-line="3" data-path="password"><span class="json-gutter"><span class="json-lineno">3</span></span><span class="json-code">  <span class="j-key">"password"</span><span class="j-punc">:</span> <span class="j-string">"new-pass"</span><span class="j-punc">,</span><span class="j-copy-btn" data-copy-json-path="password" title="复制该字段值">⧉</span></span></div><div class="json-line fold-collapsed" data-line="4" data-path="extra"><span class="json-gutter"><span class="json-fold collapsed" data-start="4" data-end="6">▶</span><span class="json-lineno">4</span></span><span class="json-code">  <span class="j-key">"extra"</span><span class="j-punc">:</span> <span class="j-punc">{</span><span class="json-collapsed-preview"> "device": "pc" },</span><span class="j-copy-btn" data-copy-json-path="extra" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="5" data-path="extra.device"><span class="json-gutter"><span class="json-lineno">5</span></span><span class="json-code">    <span class="j-key">"device"</span><span class="j-punc">:</span> <span class="j-string">"pc"</span><span class="j-copy-btn" data-copy-json-path="extra.device" title="复制该字段值">⧉</span></span></div><div class="json-line fold-hidden" data-line="6"><span class="json-gutter"><span class="json-lineno">6</span></span><span class="json-code">  <span class="j-punc">}</span><span class="j-punc">,</span></span></div><div class="json-line diff-add" data-line="7" data-path="captcha"><span class="json-gutter"><span class="json-lineno">7</span></span><span class="json-code">  <span class="j-key">"captcha"</span><span class="j-punc">:</span> <span class="j-string">"9999"</span><span class="j-copy-btn" data-copy-json-path="captcha" title="复制该字段值">⧉</span></span></div><div class="json-line" data-line="8"><span class="json-gutter"><span class="json-lineno">8</span></span><span class="json-code"><span class="j-punc">}</span></span></div></div></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1479,35 +1679,8 @@ function copy(txt, btn) {
     ta.remove();
   }
 }
-var SAMPLE_REQ = {
-  url: "https://api.example.com/v1/login?from=web&t=1",
-  headers: { "Content-Type": "application/json", Authorization: "Bearer eyJhbGciOiJIUzI1NiJ9" },
-  body: '{"username":"admin","password":"123456"}'
-};
-var SAMPLE_RES = {
-  status: "200",
-  status_text: "OK",
-  headers: { "Content-Type": "application/json; charset=utf-8", "Set-Cookie": "sid=ab3f91c0; Path=/; HttpOnly" },
-  body: '{
-  "code": 0,
-  "data": { "token": "tk_001" },
-  "msg": "ok"
-}'
-};
 function closeModal(id) { document.getElementById(id).classList.add("hide"); }
 function openModal(id) { document.getElementById(id).classList.remove("hide"); }
-function fillModal(id, s) {
-  if (id === "editReqModal") {
-    document.getElementById("editReqUrl").value = s.url;
-    document.getElementById("editReqHeaders").value = JSON.stringify(s.headers, null, 2);
-    document.getElementById("editReqBody").value = s.body;
-  } else {
-    document.getElementById("editResStatus").value = s.status;
-    document.getElementById("editResStatusText").value = s.status_text;
-    document.getElementById("editResHeaders").value = JSON.stringify(s.headers, null, 2);
-    document.getElementById("editResBody").value = s.body;
-  }
-}
 ["editReqModal", "editResModal"].forEach(function (id) {
   var m = document.getElementById(id);
   var close = m.querySelector(".modal-close"), cancel = m.querySelector(".modal-actions .btn:not(.btn-primary)"), save = m.querySelector(".btn-primary");
@@ -1522,8 +1695,18 @@ function fillModal(id, s) {
   });
 });
 document.addEventListener("click", function (e) {
-  if (e.target.closest("#editReqBtn")) { fillModal("editReqModal", SAMPLE_REQ); openModal("editReqModal"); return; }
-  if (e.target.closest("#editResBtn")) { fillModal("editResModal", SAMPLE_RES); openModal("editResModal"); return; }
+  if (e.target.closest("#editReqBtn")) { openModal("editReqModal"); return; }
+  if (e.target.closest("#editResBtn")) { openModal("editResModal"); return; }
+  var jm = e.target.closest(".je-mode");
+  if (jm) {
+    var boxEl = jm.closest("[data-json-edit]");
+    var mode = jm.getAttribute("data-je-mode");
+    boxEl.querySelectorAll(".je-mode").forEach(function (x) { x.classList.toggle("is-active", x === jm); });
+    var ta = boxEl.querySelector("textarea"), pv = boxEl.querySelector(".json-edit-preview");
+    if (mode === "edit") { pv.classList.add("hide"); ta.classList.remove("hide"); }
+    else { pv.classList.remove("hide"); ta.classList.add("hide"); }
+    return;
+  }
   var b = e.target.closest("[data-copy-block]");
   if (b) {
     var holder = b.closest(".data-block").querySelector("[data-raw]");
@@ -1533,17 +1716,555 @@ document.addEventListener("click", function (e) {
   var v = e.target.closest("[data-copy-value]");
   if (v) { copy(v.getAttribute("data-copy-value"), v); return; }
   var f = e.target.closest(".json-fold");
-  if (f) {
-    var viewer = f.closest(".json-viewer");
-    var start = Number(f.getAttribute("data-start")), end = Number(f.getAttribute("data-end"));
-    var collapsed = f.classList.toggle("collapsed");
-    f.textContent = collapsed ? "▶" : "▼";
-    for (var i = start + 1; i < end; i++) {
-      var line = viewer.querySelector('.json-line[data-line="' + i + '"]');
-      if (line) line.classList.toggle("fold-hidden", collapsed);
+  if (f) { setFoldCollapsed(f, !f.classList.contains("collapsed")); return; }
+});
+
+// 最大化对比弹窗（静态预览）：显示 / 关闭 / 对比 / 清空
+// 对比引擎直接从 app.js 序列化过来（jsonCompareEngineSource），
+// 保证预览页行为与真实页面完全一致，不另抄一份逻辑。
+var $ = function (id) { return document.getElementById(id); };
+function normDiffPath(p) {
+  let s = String(p).replace(/\[(\d+)\]/g, ".$1");
+  if (s.charAt(0) === ".") s = s.slice(1);
+  return s;
+}
+
+function viewerTextLines(viewer) {
+  const raw = viewer ? (viewer.getAttribute("data-raw") || "") : "";
+  let obj = null;
+  try { obj = JSON.parse(raw); } catch (e) { obj = null; }
+  const text = (obj !== null && typeof obj === "object") ? JSON.stringify(obj, null, 2) : raw;
+  return text.split("\n");
+}
+
+function diffLineMarks(A, B) {
+  const dp = [];
+  for (let i = 0; i <= A.length; i++) dp.push(new Array(B.length + 1).fill(0));
+  for (let i = A.length - 1; i >= 0; i--) {
+    for (let j = B.length - 1; j >= 0; j--) {
+      dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
+  const ops = [];
+  let i = 0, j = 0;
+  while (i < A.length && j < B.length) {
+    if (A[i] === B[j]) { ops.push({ t: "same", i, j }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ t: "del", i }); i++; }
+    else { ops.push({ t: "add", j }); j++; }
+  }
+  while (i < A.length) { ops.push({ t: "del", i }); i++; }
+  while (j < B.length) { ops.push({ t: "add", j }); j++; }
+  const left = new Array(A.length).fill("");
+  const right = new Array(B.length).fill("");
+  let k = 0;
+  while (k < ops.length) {
+    if (ops[k].t === "same") { k++; continue; }
+    const del = [], add = [];
+    while (k < ops.length && ops[k].t !== "same") {
+      if (ops[k].t === "del") del.push(ops[k].i); else add.push(ops[k].j);
+      k++;
+    }
+    // 相邻的「删 + 增」成对 → 视为「值不同」；多余的算纯增/纯删
+    const pair = Math.min(del.length, add.length);
+    del.forEach((idx, x) => { left[idx] = x < pair ? "mod" : "del"; });
+    add.forEach((idx, y) => { right[idx] = y < pair ? "mod" : "add"; });
+  }
+  return { left, right };
+}
+
+function flattenJson(v, prefix, out) {
+  out = out || {};
+  if (v === null || typeof v !== "object") { out[prefix] = v; return out; }
+  if (Array.isArray(v)) {
+    if (!v.length) { out[prefix] = "[]"; return out; }
+    v.forEach((it, i) => flattenJson(it, prefix + "[" + i + "]", out));
+    return out;
+  }
+  const ks = Object.keys(v);
+  if (!ks.length) { out[prefix] = "{}"; return out; }
+  ks.forEach((k) => flattenJson(v[k], prefix ? prefix + "." + k : k, out));
+  return out;
+}
+
+function diffJsonStruct(a, b) {
+  const fa = flattenJson(a, "", {});
+  const fb = flattenJson(b, "", {});
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const keys = [];
+  Object.keys(fa).forEach((k) => { if (keys.indexOf(k) < 0) keys.push(k); });
+  Object.keys(fb).forEach((k) => { if (keys.indexOf(k) < 0) keys.push(k); });
+  const rows = [];
+  keys.forEach((k) => {
+    const inA = has(fa, k), inB = has(fb, k);
+    if (inA && !inB) rows.push({ kind: "removed", path: k, a: fa[k], b: undefined });
+    else if (!inA && inB) rows.push({ kind: "added", path: k, a: undefined, b: fb[k] });
+    else if (JSON.stringify(fa[k]) !== JSON.stringify(fb[k])) rows.push({ kind: "changed", path: k, a: fa[k], b: fb[k] });
+  });
+  return rows;
+}
+
+function structDiffMarks(a, b) {
+  const left = new Map(), right = new Map();
+  let removed = 0, added = 0, changed = 0;
+  diffJsonStruct(a, b).forEach((r) => {
+    const p = normDiffPath(r.path);
+    if (r.kind === "removed") { left.set(p, "del"); removed++; }
+    else if (r.kind === "added") { right.set(p, "add"); added++; }
+    else { left.set(p, "mod"); right.set(p, "mod"); changed++; }
+  });
+  return { left, right, removed, added, changed };
+}
+
+function setFoldCollapsed(fold, collapsed) {
+  if (!fold) return;
+  const viewer = fold.closest(".json-viewer");
+  if (!viewer) return;
+  const openLine = fold.closest(".json-line");
+  const openLineNo = openLine ? Number(openLine.getAttribute("data-line")) : 0;
+  const end = Number(fold.getAttribute("data-end"));
+  fold.classList.toggle("collapsed", collapsed);
+  fold.textContent = collapsed ? "▶" : "▼";
+  if (openLine) openLine.classList.toggle("fold-collapsed", collapsed);
+  for (let i = openLineNo + 1; i <= end; i++) {
+    const line = viewer.querySelector(`.json-line[data-line="${i}"]`);
+    if (line) line.classList.toggle("fold-hidden", collapsed);
+  }
+}
+
+function expandFoldsForLines(viewer, lineNos) {
+  if (!viewer || !lineNos || !lineNos.length) return;
+  const folds = Array.from(viewer.querySelectorAll(".json-fold"));
+  lineNos.forEach((no) => {
+    folds.forEach((f) => {
+      const s = Number(f.getAttribute("data-start"));
+      const e = Number(f.getAttribute("data-end"));
+      if (no >= s && no <= e && f.classList.contains("collapsed")) setFoldCollapsed(f, false);
+    });
+  });
+}
+
+function clearDiffMarks(viewer) {
+  if (!viewer) return;
+  Array.from(viewer.querySelectorAll(".diff-add, .diff-del, .diff-mod")).forEach((el) => {
+    el.classList.remove("diff-add", "diff-del", "diff-mod");
+  });
+}
+
+function markDiffByLine(viewer, marks) {
+  if (!viewer || !marks.size) return;
+  const nos = [];
+  marks.forEach((kind, no) => {
+    const line = viewer.querySelector(`.json-line[data-line="${no}"]`);
+    if (!line) return;
+    line.classList.add("diff-" + kind);
+    nos.push(no);
+  });
+  expandFoldsForLines(viewer, nos);
+}
+
+function markDiffByPath(viewer, marks) {
+  if (!viewer || !marks.size) return;
+  const nos = [];
+  Array.from(viewer.querySelectorAll(".json-line[data-path]")).forEach((line) => {
+    const kind = marks.get(line.getAttribute("data-path"));
+    if (!kind) return;
+    line.classList.add("diff-" + kind);
+    nos.push(Number(line.getAttribute("data-line")));
+  });
+  expandFoldsForLines(viewer, nos);
+}
+
+function esc(x) {
+  if (x === null || x === undefined) return "";
+  return String(x)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function computeJsonPaths(lines) {
+  const stack = []; // { kind: 'obj'|'arr', prefix, idx }
+  for (const ln of lines) {
+    const trimmed = ln.raw.trim();
+    // 闭合行：} ] }, ],
+    if (trimmed === "}" || trimmed === "]" || trimmed === "}," || trimmed === "],") {
+      ln.kind = "close";
+      ln.path = null;
+      if (stack.length) stack.pop();
+      continue;
+    }
+    // 键行："key": value
+    const km = trimmed.match(/^("(?:[^"\\]|\\.)*")\s*:\s*([\s\S]*)$/);
+    if (km) {
+      const key = JSON.parse(km[1]);
+      const rest = km[2].trim();
+      const parentPrefix = stack.length ? stack[stack.length - 1].prefix : "";
+      const path = parentPrefix ? parentPrefix + "." + key : key;
+      ln.path = path;
+      if (rest === "{" || rest === "[") {
+        ln.kind = "open";
+        stack.push({ kind: rest === "{" ? "obj" : "arr", prefix: path, idx: 0 });
+      } else {
+        ln.kind = "leaf";
+      }
+      continue;
+    }
+    // 非键行：根容器 / 数组元素容器（{ 或 [ 起头）
+    const isOpen = trimmed[0] === "{" || trimmed[0] === "[";
+    const parent = stack.length ? stack[stack.length - 1] : null;
+    if (isOpen) {
+      const kind = trimmed[0] === "{" ? "obj" : "arr";
+      let path;
+      if (parent && parent.kind === "arr") {
+        path = parent.prefix ? parent.prefix + "." + parent.idx : String(parent.idx);
+        parent.idx++;
+      } else if (parent && parent.kind === "obj") {
+        path = parent.prefix;
+      } else {
+        path = "";
+      }
+      ln.kind = "open";
+      ln.path = path;
+      stack.push({ kind, prefix: path, idx: 0 });
+      continue;
+    }
+    // 数组元素标量
+    if (parent && parent.kind === "arr") {
+      const path = parent.prefix ? parent.prefix + "." + parent.idx : String(parent.idx);
+      ln.path = path;
+      ln.kind = "leaf";
+      parent.idx++;
+      continue;
+    }
+    ln.kind = "leaf";
+    ln.path = null;
+  }
+}
+
+function highlightJsonLine(line) {
+  const tokens = [];
+  // 字符串 | 数字 | true/false/null | 标点/空白
+  const re = /\s+|"(?:[^"\\]|\\.)*"|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(true|false|null)|[{}[\]:,]/g;
+  let lastIndex = 0;
+  let m;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > lastIndex) tokens.push({ type: "text", value: line.slice(lastIndex, m.index) });
+    const v = m[0];
+    if (/^\s+$/.test(v)) tokens.push({ type: "text", value: v });
+    else if (m[1] !== undefined) tokens.push({ type: "number", value: v });
+    else if (m[2] !== undefined) tokens.push({ type: v === "null" ? "null" : "boolean", value: v });
+    else if (v[0] === '"') tokens.push({ type: "string", value: v });
+    else tokens.push({ type: "punc", value: v });
+    lastIndex = re.lastIndex;
+  }
+  if (lastIndex < line.length) tokens.push({ type: "text", value: line.slice(lastIndex) });
+
+  // 在 key: value 行中，把紧跟 ':' 的字符串标为 key
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (tokens[i].type === "string" && tokens[i + 1].type === "punc" && tokens[i + 1].value === ":") {
+      tokens[i].type = "key";
+    }
+  }
+
+  return tokens.map((t) => {
+    if (t.type === "text") return esc(t.value);
+    return `<span class="j-${t.type}">${esc(t.value)}</span>`;
+  }).join("");
+}
+
+function renderJsonGutter(text, opts) {
+  opts = opts || {};
+  if (text === null || text === undefined || text === "") return '<div class="json-empty">（空）</div>';
+  let obj = null;
+  try { obj = JSON.parse(typeof text === "string" ? text : JSON.stringify(text)); } catch (e) { obj = null; }
+
+  // 标准格式化：缩进完全由 JSON.stringify 产出，绝不手搓
+  let pretty;
+  let hasPaths = false;
+  if (obj !== null && typeof obj === "object") {
+    pretty = JSON.stringify(obj, null, 2);
+    hasPaths = true;
+  } else {
+    pretty = typeof text === "string" ? text : JSON.stringify(text, null, 2);
+  }
+
+  // 逐行：{ indent, raw(含标准缩进), path, kind }
+  const lines = pretty.split("\n").map((t) => {
+    const m = t.match(/^(\s*)/);
+    return { indent: (m ? m[1].length : 0) / 2, raw: t, path: null, kind: "leaf" };
+  });
+
+  if (hasPaths) computeJsonPaths(lines);
+
+  // 折叠块：基于括号匹配（open 行 → 对应 close 行），与缩进无关，不依赖手搓层级
+  const folds = [];
+  const st = [];
+  lines.forEach((ln, i) => {
+    if (ln.kind === "open") st.push(i);
+    else if (ln.kind === "close" && st.length) {
+      const open = st.pop();
+      folds.push({ start: open + 1, end: i + 1 });
+    }
+  });
+  const foldMap = new Map();
+  folds.forEach((f, idx) => foldMap.set(f.start, idx));
+
+  // 默认折叠：第一层（indent 1）及以上的对象/数组全部收起，只显示根级字段名
+  // 这样打开详情时先看到整体结构，再逐层展开定位
+  const collapsedLines = new Set();
+  const hiddenLines = new Set();
+  folds.forEach((f) => {
+    const openIdx = f.start - 1;
+    if (lines[openIdx].indent >= 1) {
+      collapsedLines.add(f.start);
+      for (let i = f.start + 1; i <= f.end; i++) hiddenLines.add(i);
+    }
+  });
+
+  // 折叠预览：开括号行被折叠时，在同一行显示内部摘要，避免只剩孤零零的 "{"
+  const openPreviews = new Map();
+  folds.forEach((f) => {
+    const openIdx = f.start - 1;
+    const closeIdx = f.end - 1;
+    const inner = [];
+    for (let k = openIdx + 1; k < closeIdx; k++) {
+      const t = lines[k].raw.trim();
+      if (t) inner.push(t);
+    }
+    const closeRaw = lines[closeIdx].raw.trim();
+    if (inner.length) {
+      const first = inner[0];
+      const truncated = first.slice(0, 40);
+      const more = inner.length > 1 || first.length > 40;
+      openPreviews.set(f.start, " " + truncated + (more ? "..." : "") + " " + closeRaw);
+    } else {
+      openPreviews.set(f.start, " " + closeRaw);
+    }
+  });
+
+  const pad = String(lines.length).length;
+  const annMap = (hasPaths && opts.annotations && opts.seq != null && opts.annotateTarget)
+    ? opts.annotations : null;
+
+  const body = lines.map((line, idx) => {
+    const lineNo = idx + 1;
+    const isHidden = hiddenLines.has(lineNo);
+    const isCollapsed = collapsedLines.has(lineNo);
+    let gutter = `<span class="json-lineno">${String(lineNo).padStart(pad, " ")}</span>`;
+    const fidx = foldMap.get(lineNo);
+    if (fidx !== undefined) {
+      gutter = `<span class="json-fold${isCollapsed ? " collapsed" : ""}" data-start="${folds[fidx].start}" data-end="${folds[fidx].end}">${isCollapsed ? "▶" : "▼"}</span>` + gutter;
+    }
+    let annHtml = "";
+    if (annMap && line.path) {
+      const note = annMap[line.path];
+      annHtml =
+        `<span class="j-ann-btn" data-ann-seq="${opts.seq}" data-ann-path="${esc(line.path)}" data-ann-target="${esc(opts.annotateTarget)}" title="添加/编辑注释">✎</span>` +
+        (note ? `<span class="j-ann-txt"> // ${esc(note)}</span>` : "");
+    }
+    const copyBtn = line.path
+      ? `<span class="j-copy-btn" data-copy-json-path="${esc(line.path)}" title="复制该字段值">⧉</span>`
+      : "";
+    const lineCls = "json-line" + (isHidden ? " fold-hidden" : "") + (isCollapsed ? " fold-collapsed" : "") + ((annMap && line.path && annMap[line.path]) ? " j-annotated" : "");
+    const collapsedPreview = openPreviews.get(lineNo);
+    const previewSpan = collapsedPreview ? `<span class="json-collapsed-preview">${esc(collapsedPreview)}</span>` : "";
+    const code = (line.raw ? highlightJsonLine(line.raw) : "&nbsp;") + previewSpan + annHtml + copyBtn;
+    const pathAttr = line.path ? ` data-path="${esc(line.path)}"` : "";
+    return `<div class="${lineCls}" data-line="${lineNo}"${pathAttr}><span class="json-gutter">${gutter}</span><span class="json-code">${code}</span></div>`;
+  }).join("");
+
+  const rawForCopy = opts.copyRaw != null ? opts.copyRaw : (typeof text === "string" ? text : JSON.stringify(text, null, 2));
+  const viewer = `<div class="json-viewer code" data-raw="${esc(rawForCopy)}">${body}</div>`;
+  if (opts.copyRaw != null && !opts.hideCopyBtn) {
+    return `<div class="code-wrap">` +
+      `<span class="code-tools">` +
+      `<button class="btn-mini code-copy" data-copy>复制</button>` +
+      `<button class="btn-mini code-max" data-max title="最大化查看">⛶</button>` +
+      `</span>` +
+      viewer + `</div>`;
+  }
+  return viewer;
+}
+
+function currentJsonCompareMode() {
+  const b = document.querySelector("#jsonMaxBar .jm-mode.is-active");
+  return b ? b.getAttribute("data-jm-mode") : "field";
+}
+
+function setCompareMode(mode) {
+  Array.from(document.querySelectorAll("#jsonMaxBar .jm-mode")).forEach((b) => {
+    b.classList.toggle("is-active", b.getAttribute("data-jm-mode") === mode);
+  });
+}
+
+function setCompareStat(text, kind) {
+  const el = $("jsonMaxCompareStat");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove("ok", "warn");
+  if (kind) el.classList.add(kind);
+}
+
+function summaryText(removed, added, changed) {
+  const total = removed + added + changed;
+  if (!total) return { text: "两侧一致，无差异 ✓", kind: "ok" };
+  return { text: `共 ${total} 处差异：仅左侧 ${removed} · 仅右侧 ${added} · 值不同 ${changed}`, kind: "" };
+}
+
+function renderCompareViewer(text) {
+  const view = $("jsonMaxCompareView");
+  if (!view) return;
+  if (!String(text == null ? "" : text).trim()) { view.innerHTML = ""; view.classList.add("hide"); return; }
+  view.innerHTML = renderJsonGutter(text, { copyRaw: text, hideCopyBtn: true });
+  view.classList.remove("hide");
+}
+
+function setComparePaneMode(mode) {
+  const ta = $("jsonMaxCompareInput");
+  const view = $("jsonMaxCompareView");
+  const editBtn = $("jsonMaxCompareEdit");
+  if (!ta || !view) return;
+  const editing = mode === "edit" || !view.innerHTML.trim();
+  if (editing && ta.value.trim()) ta.value = pretty(ta.value);
+  ta.classList.toggle("hide", !editing);
+  view.classList.toggle("hide", editing);
+  if (editBtn) editBtn.classList.toggle("hide", editing);
+}
+
+function showCompareJson() {
+  const ta = $("jsonMaxCompareInput");
+  if (!ta) return false;
+  renderCompareViewer(ta.value);
+  const view = $("jsonMaxCompareView");
+  if (!view || !view.innerHTML.trim()) return false;
+  setComparePaneMode("preview");
+  return true;
+}
+
+function runJsonCompare() {
+  const leftViewer = $("jsonMaxBody") ? $("jsonMaxBody").querySelector(".json-viewer") : null;
+  const rightViewer = $("jsonMaxCompareView") ? $("jsonMaxCompareView").querySelector(".json-viewer") : null;
+  const ta = $("jsonMaxCompareInput");
+  if (!leftViewer || !rightViewer || !ta) return;
+  clearDiffMarks(leftViewer);
+  clearDiffMarks(rightViewer);
+  if (!String(ta.value || "").trim()) { setCompareStat("请先粘贴要对比的 JSON。", "warn"); return; }
+
+  if (currentJsonCompareMode() === "line") {
+    const d = diffLineMarks(viewerTextLines(leftViewer), viewerTextLines(rightViewer));
+    const lm = new Map(), rm = new Map();
+    let removed = 0, added = 0, changed = 0;
+    d.left.forEach((kind, idx) => {
+      if (!kind) return;
+      lm.set(idx + 1, kind);
+      if (kind === "del") removed++;
+      else if (kind === "mod") changed++;
+    });
+    d.right.forEach((kind, idx) => {
+      if (!kind) return;
+      rm.set(idx + 1, kind);
+      if (kind === "add") added++;
+    });
+    markDiffByLine(leftViewer, lm);
+    markDiffByLine(rightViewer, rm);
+    const s = summaryText(removed, added, changed);
+    setCompareStat(s.text, s.kind);
+    return;
+  }
+
+  let a = null, b = null;
+  try { a = JSON.parse(leftViewer.getAttribute("data-raw") || ""); } catch (e) { a = null; }
+  try { b = JSON.parse(rightViewer.getAttribute("data-raw") || ""); } catch (e) { b = null; }
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
+    setCompareStat("字段对比需要两侧都是合法 JSON 对象，可切到「按行」做严格文本对比。", "warn");
+    return;
+  }
+  const d = structDiffMarks(a, b);
+  markDiffByPath(leftViewer, d.left);
+  markDiffByPath(rightViewer, d.right);
+  const s = summaryText(d.removed, d.added, d.changed);
+  setCompareStat(s.text, s.kind);
+}
+
+function resetJsonCompare() {
+  const ta = $("jsonMaxCompareInput");
+  if (ta) ta.value = "";
+  const view = $("jsonMaxCompareView");
+  if (view) { view.innerHTML = ""; view.classList.add("hide"); }
+  setCompareMode("field");
+  setComparePaneMode("edit");
+  clearDiffMarks($("jsonMaxBody") ? $("jsonMaxBody").querySelector(".json-viewer") : null);
+  setCompareStat("粘贴另一份 JSON 后点「对比」，差异会在左右两侧 JSON 区里高亮。", "");
+}
+
+function setCompareOpen(open) {
+  const pane = $("jsonMaxCompare");
+  if (pane) pane.classList.toggle("hide", !open);
+  const bar = $("jsonMaxBar");
+  if (bar) bar.classList.toggle("hide", !open);
+  const btn = $("jsonMaxCompareBtn");
+  if (btn) {
+    btn.classList.toggle("is-active", open);
+    btn.textContent = open ? "收起对比" : "对比";
+  }
+}
+
+function toggleCompare() {
+  const pane = $("jsonMaxCompare");
+  setCompareOpen(pane ? pane.classList.contains("hide") : true);
+}
+
+function linkCompareScroll() {
+  const a = $("jsonMaxBody");
+  const b = $("jsonMaxCompareView");
+  if (!a || !b || a._cmpScrollLinked) return;
+  a._cmpScrollLinked = true;
+  b._cmpScrollLinked = true;
+  let lock = false;
+  const raf = (typeof requestAnimationFrame === "function")
+    ? requestAnimationFrame
+    : (fn) => setTimeout(fn, 0);
+  const sync = (src, dst) => {
+    if (lock) return;
+    lock = true;
+    dst.scrollTop = src.scrollTop;
+    dst.scrollLeft = src.scrollLeft;
+    raf(() => { lock = false; });
+  };
+  a.addEventListener("scroll", () => sync(a, b), { passive: true });
+  b.addEventListener("scroll", () => sync(b, a), { passive: true });
+}
+
+document.getElementById("pvShowMax").addEventListener("click", function () {
+  document.getElementById("jsonMaxModal").classList.remove("hide");
 });
+document.getElementById("jsonMaxClose").addEventListener("click", function () {
+  document.getElementById("jsonMaxModal").classList.add("hide");
+});
+document.getElementById("jsonMaxModal").addEventListener("click", function (e) {
+  if (e.target === this) this.classList.add("hide");
+});
+document.getElementById("jsonMaxCompareBtn").addEventListener("click", function () {
+  toggleCompare();
+});
+document.getElementById("jsonMaxCompareRun").addEventListener("click", function () {
+  if (showCompareJson()) runJsonCompare();
+});
+document.getElementById("jsonMaxCompareEdit").addEventListener("click", function () {
+  setComparePaneMode("edit");
+});
+document.getElementById("jsonMaxCompareClear").addEventListener("click", function () {
+  resetJsonCompare();
+});
+document.querySelectorAll("#jsonMaxBar .jm-mode").forEach(function (b) {
+  b.addEventListener("click", function () {
+    setCompareMode(b.getAttribute("data-jm-mode"));
+    var ta = document.getElementById("jsonMaxCompareInput");
+    if (ta.value.trim() && showCompareJson()) runJsonCompare();
+  });
+});
+linkCompareScroll();
 </script>
 </body>
 </html>

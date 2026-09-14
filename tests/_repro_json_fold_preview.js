@@ -90,50 +90,66 @@ setTimeout(() => {
   const folds = viewer.querySelectorAll(".json-fold");
   assert("存在可折叠节点", folds.length > 0, folds.length);
 
-  // 找一个对象 open 行（如 "data": {）
+  // 找一个对象 open 行（如 "data": {）——用 fold-collapsed 区分根（不折叠）与该对象（默认折叠），避免被根行的折叠预览文本干扰
   const fold = Array.from(folds).find((f) => {
     const line = f.closest(".json-line");
-    return line && /"data"\s*:/.test(line.textContent);
+    return line && line.classList.contains("fold-collapsed") && /"data"\s*:/.test(line.textContent);
   }) || folds[0];
 
   const openLine = fold.closest(".json-line");
   const openLineNo = Number(openLine.getAttribute("data-line"));
   const endLineNo = Number(fold.getAttribute("data-end"));
-
-  // 折叠前：无 fold-collapsed，预览隐藏
-  assert("折叠前 openLine 无 fold-collapsed", !openLine.classList.contains("fold-collapsed"));
   const preview = openLine.querySelector(".json-collapsed-preview");
-  assert("折叠前预览 span 已存在", !!preview);
 
-  // 点击折叠
-  fold.dispatchEvent(new window.Event("click", { bubbles: true }));
-  assert("折叠后 fold 按钮变成 ▶", fold.textContent === "▶", fold.textContent);
-  assert("折叠后 openLine 有 fold-collapsed", openLine.classList.contains("fold-collapsed"));
+  // 默认折叠：第一层对象/数组（indent >= 1）应初始收起
+  assert("默认状态下第一层对象已折叠", fold.textContent === "▶", fold.textContent);
+  assert("默认折叠行有 fold-collapsed", openLine.classList.contains("fold-collapsed"));
+  assert("默认折叠预览 span 已存在并显示", !!preview && preview.textContent.length > 2, preview && preview.textContent);
 
-  const previewText = preview ? preview.textContent : "";
-  assert("折叠预览显示文本", previewText.length > 2, previewText);
-  assert("折叠预览含关闭符号", previewText.indexOf("}") >= 0 || previewText.indexOf("]") >= 0, previewText);
-  assert("折叠预览含省略号（多字段）", previewText.indexOf("...") >= 0, previewText);
-
-  // 折叠后，open 到 close 之间的行全部隐藏（含 close 行）
-  let hiddenOk = true;
+  let hiddenByDefault = true;
   for (let n = openLineNo + 1; n <= endLineNo; n++) {
     const line = viewer.querySelector(`.json-line[data-line="${n}"]`);
-    if (line && !line.classList.contains("fold-hidden")) hiddenOk = false;
+    if (line && !line.classList.contains("fold-hidden")) hiddenByDefault = false;
   }
-  assert("折叠后 open+1 到 close 全部 fold-hidden", hiddenOk, { openLineNo, endLineNo });
+  assert("默认折叠下内部行全部 fold-hidden", hiddenByDefault, { openLineNo, endLineNo });
 
-  // 展开
+  // 点击展开
   fold.dispatchEvent(new window.Event("click", { bubbles: true }));
   assert("展开后 fold 按钮变回 ▼", fold.textContent === "▼", fold.textContent);
   assert("展开后 openLine 无 fold-collapsed", !openLine.classList.contains("fold-collapsed"));
-
   let shownOk = true;
   for (let n = openLineNo + 1; n <= endLineNo; n++) {
     const line = viewer.querySelector(`.json-line[data-line="${n}"]`);
     if (line && line.classList.contains("fold-hidden")) shownOk = false;
   }
   assert("展开后隐藏行恢复显示", shownOk);
+
+  // 再次点击折叠 -> 预览文本正确
+  fold.dispatchEvent(new window.Event("click", { bubbles: true }));
+  assert("再次折叠后 fold 按钮变成 ▶", fold.textContent === "▶", fold.textContent);
+  const previewText = preview ? preview.textContent : "";
+  assert("折叠预览含关闭符号", previewText.indexOf("}") >= 0 || previewText.indexOf("]") >= 0, previewText);
+  assert("折叠预览含省略号（多字段）", previewText.indexOf("...") >= 0, previewText);
+
+  // JSON 字段级复制
+  let copiedText = null;
+  window.navigator.clipboard = { writeText: (t) => { copiedText = t; return Promise.resolve(); } };
+  const copyBtn = viewer.querySelector('[data-copy-json-path="data.user.id"]');
+  assert("标量字段存在复制按钮", !!copyBtn);
+  if (copyBtn) {
+    copyBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+    assert("点击复制按钮复制字段值", copiedText === "1", copiedText);
+  }
+  const copyStrBtn = viewer.querySelector('[data-copy-json-path="data.user.name"]');
+  if (copyStrBtn) {
+    copyStrBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+    assert("字符串字段复制不带引号", copiedText === "Alice", copiedText);
+  }
+  const copyObjBtn = viewer.querySelector('[data-copy-json-path="data.user"]');
+  if (copyObjBtn) {
+    copyObjBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+    assert("对象字段复制为 JSON 字符串", copiedText === JSON.stringify({ id: 1, name: "Alice" }), copiedText);
+  }
 
   console.log(`\nRESULT pass=${pass} fail=${fail}`);
   process.exit(fail ? 1 : 0);

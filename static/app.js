@@ -98,6 +98,17 @@ function fmtSize(bytes) {
   return (bytes / 1024 / 1024).toFixed(2) + " MB";
 }
 
+function getPath(obj, path) {
+  if (path === "") return obj;
+  let cur = obj;
+  for (const p of String(path).split(".")) {
+    if (cur == null) return undefined;
+    if (Array.isArray(cur)) cur = cur[parseInt(p, 10)];
+    else cur = cur[p];
+  }
+  return cur;
+}
+
 function statusClass(r) {
   if (r.is_failed) return "s-fail";
   const s = r.response && r.response.status;
@@ -374,13 +385,17 @@ function applyMockFilterSort() {
 // 因此即使路径算法有边角问题，也只影响注释、不会再搞坏排版。
 // line = { indent, raw, path, kind: 'open'|'close'|'leaf' }
 function computeJsonPaths(lines) {
-  const stack = []; // { indent, kind: 'obj'|'arr', prefix, idx }
+  const stack = []; // { kind: 'obj'|'arr', prefix, idx }
   for (const ln of lines) {
     const trimmed = ln.raw.trim();
-    while (stack.length && stack[stack.length - 1].indent >= ln.indent) stack.pop();
-
-    if (trimmed === "}" || trimmed === "]" || trimmed === "}," || trimmed === "],") { ln.kind = "close"; ln.path = null; continue; }
-
+    // 闭合行：} ] }, ],
+    if (trimmed === "}" || trimmed === "]" || trimmed === "}," || trimmed === "],") {
+      ln.kind = "close";
+      ln.path = null;
+      if (stack.length) stack.pop();
+      continue;
+    }
+    // 键行："key": value
     const km = trimmed.match(/^("(?:[^"\\]|\\.)*")\s*:\s*([\s\S]*)$/);
     if (km) {
       const key = JSON.parse(km[1]);
@@ -390,26 +405,39 @@ function computeJsonPaths(lines) {
       ln.path = path;
       if (rest === "{" || rest === "[") {
         ln.kind = "open";
-        stack.push({ indent: ln.indent, kind: rest === "{" ? "obj" : "arr", prefix: path, idx: 0 });
+        stack.push({ kind: rest === "{" ? "obj" : "arr", prefix: path, idx: 0 });
       } else {
         ln.kind = "leaf";
       }
       continue;
     }
-
-    if (stack.length && stack[stack.length - 1].kind === "arr") {
-      const arr = stack[stack.length - 1];
-      const path = arr.prefix ? arr.prefix + "." + arr.idx : String(arr.idx);
-      ln.path = path;
-      const isOpen = trimmed[0] === "{" || trimmed[0] === "[";
-      ln.kind = isOpen ? "open" : "leaf";
-      if (isOpen) {
-        stack.push({ indent: ln.indent, kind: trimmed[0] === "{" ? "obj" : "arr", prefix: path, idx: 0 });
+    // 非键行：根容器 / 数组元素容器（{ 或 [ 起头）
+    const isOpen = trimmed[0] === "{" || trimmed[0] === "[";
+    const parent = stack.length ? stack[stack.length - 1] : null;
+    if (isOpen) {
+      const kind = trimmed[0] === "{" ? "obj" : "arr";
+      let path;
+      if (parent && parent.kind === "arr") {
+        path = parent.prefix ? parent.prefix + "." + parent.idx : String(parent.idx);
+        parent.idx++;
+      } else if (parent && parent.kind === "obj") {
+        path = parent.prefix;
+      } else {
+        path = "";
       }
-      arr.idx++;
+      ln.kind = "open";
+      ln.path = path;
+      stack.push({ kind, prefix: path, idx: 0 });
       continue;
     }
-
+    // 数组元素标量
+    if (parent && parent.kind === "arr") {
+      const path = parent.prefix ? parent.prefix + "." + parent.idx : String(parent.idx);
+      ln.path = path;
+      ln.kind = "leaf";
+      parent.idx++;
+      continue;
+    }
     ln.kind = "leaf";
     ln.path = null;
   }
@@ -489,6 +517,18 @@ function renderJsonGutter(text, opts) {
   const foldMap = new Map();
   folds.forEach((f, idx) => foldMap.set(f.start, idx));
 
+  // 默认折叠：第一层（indent 1）及以上的对象/数组全部收起，只显示根级字段名
+  // 这样打开详情时先看到整体结构，再逐层展开定位
+  const collapsedLines = new Set();
+  const hiddenLines = new Set();
+  folds.forEach((f) => {
+    const openIdx = f.start - 1;
+    if (lines[openIdx].indent >= 1) {
+      collapsedLines.add(f.start);
+      for (let i = f.start + 1; i <= f.end; i++) hiddenLines.add(i);
+    }
+  });
+
   // 折叠预览：开括号行被折叠时，在同一行显示内部摘要，避免只剩孤零零的 "{"
   const openPreviews = new Map();
   folds.forEach((f) => {
@@ -516,10 +556,12 @@ function renderJsonGutter(text, opts) {
 
   const body = lines.map((line, idx) => {
     const lineNo = idx + 1;
+    const isHidden = hiddenLines.has(lineNo);
+    const isCollapsed = collapsedLines.has(lineNo);
     let gutter = `<span class="json-lineno">${String(lineNo).padStart(pad, " ")}</span>`;
     const fidx = foldMap.get(lineNo);
     if (fidx !== undefined) {
-      gutter = `<span class="json-fold" data-start="${folds[fidx].start}" data-end="${folds[fidx].end}">▼</span>` + gutter;
+      gutter = `<span class="json-fold${isCollapsed ? " collapsed" : ""}" data-start="${folds[fidx].start}" data-end="${folds[fidx].end}">${isCollapsed ? "▶" : "▼"}</span>` + gutter;
     }
     let annHtml = "";
     if (annMap && line.path) {
@@ -528,11 +570,15 @@ function renderJsonGutter(text, opts) {
         `<span class="j-ann-btn" data-ann-seq="${opts.seq}" data-ann-path="${esc(line.path)}" data-ann-target="${esc(opts.annotateTarget)}" title="添加/编辑注释">✎</span>` +
         (note ? `<span class="j-ann-txt"> // ${esc(note)}</span>` : "");
     }
-    const lineCls = "json-line" + ((annMap && line.path && annMap[line.path]) ? " j-annotated" : "");
+    const copyBtn = line.path
+      ? `<span class="j-copy-btn" data-copy-json-path="${esc(line.path)}" title="复制该字段值">⧉</span>`
+      : "";
+    const lineCls = "json-line" + (isHidden ? " fold-hidden" : "") + (isCollapsed ? " fold-collapsed" : "") + ((annMap && line.path && annMap[line.path]) ? " j-annotated" : "");
     const collapsedPreview = openPreviews.get(lineNo);
     const previewSpan = collapsedPreview ? `<span class="json-collapsed-preview">${esc(collapsedPreview)}</span>` : "";
-    const code = (line.raw ? highlightJsonLine(line.raw) : "&nbsp;") + previewSpan + annHtml;
-    return `<div class="${lineCls}" data-line="${lineNo}"><span class="json-gutter">${gutter}</span><span class="json-code">${code}</span></div>`;
+    const code = (line.raw ? highlightJsonLine(line.raw) : "&nbsp;") + previewSpan + annHtml + copyBtn;
+    const pathAttr = line.path ? ` data-path="${esc(line.path)}"` : "";
+    return `<div class="${lineCls}" data-line="${lineNo}"${pathAttr}><span class="json-gutter">${gutter}</span><span class="json-code">${code}</span></div>`;
   }).join("");
 
   const rawForCopy = opts.copyRaw != null ? opts.copyRaw : (typeof text === "string" ? text : JSON.stringify(text, null, 2));
@@ -596,6 +642,48 @@ function dataBlock(payload, opts) {
     `<div class="db-body">${body}</div>` +
     `</div>`
   );
+}
+
+// ---------------- JSON 编辑区（统一组件预览 + 原文编辑）----------------
+// 编辑请求/响应弹窗里的 JSON 区不再裸用 textarea，而是复用详情页同一套
+// JSON 组件（行号 / 折叠 / 复制 / 最大化）做预览，点「编辑原文」切到 textarea。
+// textarea 始终是保存真源，预览只是它的渲染结果。
+function renderJsonEditPreview(previewEl, text) {
+  if (!previewEl) return;
+  const t = text == null ? "" : String(text).trim();
+  if (t === "") { previewEl.innerHTML = `<div class="json-edit-empty">（空）</div>`; return; }
+  previewEl.innerHTML = renderJsonGutter(t, { copyRaw: t });
+}
+
+function wireJsonEdit(container) {
+  if (!container) return;
+  const ta = container.querySelector("textarea");
+  const preview = container.querySelector(".json-edit-preview");
+  if (!ta || !preview) return;
+  const modes = Array.from(container.querySelectorAll(".je-mode"));
+  const setMode = (mode) => {
+    modes.forEach((b) => b.classList.toggle("is-active", b.getAttribute("data-je-mode") === mode));
+    if (mode === "edit") {
+      preview.classList.add("hide");
+      ta.classList.remove("hide");
+    } else {
+      renderJsonEditPreview(preview, ta.value);
+      preview.classList.remove("hide");
+      ta.classList.add("hide");
+    }
+  };
+  modes.forEach((b) => b.addEventListener("click", () => setMode(b.getAttribute("data-je-mode"))));
+  container.__jeSetMode = setMode;
+  setMode("preview");
+}
+
+function wireJsonEdits() {
+  document.querySelectorAll("[data-json-edit]").forEach(wireJsonEdit);
+}
+
+function refreshJsonEdit(textareaEl) {
+  const c = textareaEl && textareaEl.closest("[data-json-edit]");
+  if (c && c.__jeSetMode) c.__jeSetMode("preview");
 }
 
 function renderMockApis(list) {
@@ -816,6 +904,7 @@ let mockLogs = [];
 const mockLogList = $("mockLogList");
 const mockLogsCount = $("mockLogsCount");
 const mockLogsRefreshBtn = $("mockLogsRefreshBtn");
+const mockLogsClearBtn = $("mockLogsClearBtn");
 const mockLogModal = $("mockLogModal");
 const mockLogModalBody = $("mockLogModalBody");
 
@@ -836,6 +925,7 @@ function loadMockLogs() {
 function renderMockLogs() {
   if (!mockLogList) return;
   mockLogsCount.textContent = mockLogs.length ? `(${mockLogs.length})` : "";
+  if (mockLogsClearBtn) mockLogsClearBtn.disabled = !mockLogs.length;
   if (!mockLogs.length) {
     mockLogList.innerHTML = `<div class="mock-api-empty">暂无处理记录（Mock 收到请求后这里会实时显示，点击可查看详情）。</div>`;
     return;
@@ -852,7 +942,7 @@ function renderMockLogs() {
         `<span class="log-ts">${fmtTime(l.ts)}</span>` +
         `<span class="m m-${methodClass(l)}">${esc(l.method)}</span>` +
         `<span class="s ${sc}">${esc(String(l.status))}</span>` +
-        `<span class="path-text" title="${esc(l.url || "")}">${esc(l.path || "/")}${l.query ? "?" + esc(l.query) : ""}</span>` +
+        `<span class="path-text" title="${esc(l.url || ((l.path || "/") + (l.query ? "?" + l.query : "")))}">${esc(l.path || "/")}${l.query ? "?" + esc(l.query) : ""}</span>` +
         miss +
         missWhy +
         `</div>`
@@ -880,7 +970,7 @@ function showMockLogDetail(log) {
   const resBody = log.res_body ? renderJsonGutter(pretty(log.res_body), { copyRaw: log.res_body }) : `<div class="note">空响应体</div>`;
   mockLogModalBody.innerHTML =
     `<div class="mock-log-sec"><div class="mock-log-sec-title">请求</div>` +
-    `<div class="mock-log-url">${esc(log.method)} ${esc(log.url || "")}</div>` +
+    `<div class="mock-log-url">${esc(log.method)} ${esc(log.url || ((log.path || "/") + (log.query ? "?" + log.query : "")))}</div>` +
     missWhy +
     `<div class="mock-log-sub">请求头</div>${reqHdr}` +
     `<div class="mock-log-sub">请求体</div>${reqBody}</div>` +
@@ -891,6 +981,15 @@ function showMockLogDetail(log) {
 }
 
 if (mockLogsRefreshBtn) mockLogsRefreshBtn.addEventListener("click", loadMockLogs);
+if (mockLogsClearBtn) {
+  mockLogsClearBtn.disabled = true;
+  mockLogsClearBtn.addEventListener("click", () => {
+    if (!mockLogs.length) return;
+    if (!confirm("确认清空全部处理记录？")) return;
+    mockLogsClearBtn.disabled = true;
+    postJSON("/api/mock/logs/clear", {}).then(() => loadMockLogs()).catch(() => { mockLogsClearBtn.disabled = false; });
+  });
+}
 if (mockLogModal) {
   $("mockLogModalClose").addEventListener("click", () => mockLogModal.classList.add("hide"));
   mockLogModal.addEventListener("click", (e) => {
@@ -1432,8 +1531,11 @@ function openEditReq(rec) {
   $("editReqUrl").value = rec.url || "";
   const hdr = (rec.request && rec.request.headers) || {};
   $("editReqHeaders").value = Object.keys(hdr).length ? JSON.stringify(hdr, null, 2) : "{}";
-  $("editReqBody").value = (rec.request && rec.request.post_data) != null ? rec.request.post_data : "";
+  const reqBodyRaw = (rec.request && rec.request.post_data) != null ? rec.request.post_data : "";
+  $("editReqBody").value = pretty(reqBodyRaw) || "";
   $("editReqErr").textContent = "";
+  refreshJsonEdit($("editReqHeaders"));
+  refreshJsonEdit($("editReqBody"));
   modal.classList.remove("hide");
   setTimeout(() => $("editReqUrl") && $("editReqUrl").focus(), 50);
 }
@@ -1477,8 +1579,10 @@ function openEditRes(rec) {
   const hdr = r.headers || {};
   $("editResHeaders").value = Object.keys(hdr).length ? JSON.stringify(hdr, null, 2) : "{}";
   const b = r.body;
-  $("editResBody").value = b == null ? "" : (typeof b === "string" ? b : JSON.stringify(b, null, 2));
+  $("editResBody").value = b == null ? "" : (pretty(b) || "");
   $("editResErr").textContent = "";
+  refreshJsonEdit($("editResHeaders"));
+  refreshJsonEdit($("editResBody"));
   modal.classList.remove("hide");
   setTimeout(() => $("editResStatus") && $("editResStatus").focus(), 50);
 }
@@ -1542,10 +1646,17 @@ function copyText(text, btn) {
     btn.disabled = true;
     setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 1200);
   };
+  const fail = () => fallbackCopy(text, ok);
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(ok).catch(() => fallbackCopy(text, ok));
+    try {
+      const p = navigator.clipboard.writeText(text);
+      if (p && typeof p.then === "function") p.then(ok).catch(fail);
+      else ok();
+    } catch (e) {
+      fail();
+    }
   } else {
-    fallbackCopy(text, ok);
+    fail();
   }
 }
 
@@ -1570,24 +1681,41 @@ function fallbackCopy(text, ok) {
 // 折叠 / 复制 / 字段注释 统一在 document 上委托，
 // 这样无论 JSON 渲染在详情页、Mock 卡片还是 Mock 日志弹窗，交互都生效，
 // 不再依赖各容器单独调用 wireJsonFolds。
+function setFoldCollapsed(fold, collapsed) {
+  if (!fold) return;
+  const viewer = fold.closest(".json-viewer");
+  if (!viewer) return;
+  const openLine = fold.closest(".json-line");
+  const openLineNo = openLine ? Number(openLine.getAttribute("data-line")) : 0;
+  const end = Number(fold.getAttribute("data-end"));
+  fold.classList.toggle("collapsed", collapsed);
+  fold.textContent = collapsed ? "▶" : "▼";
+  if (openLine) openLine.classList.toggle("fold-collapsed", collapsed);
+  for (let i = openLineNo + 1; i <= end; i++) {
+    const line = viewer.querySelector(`.json-line[data-line="${i}"]`);
+    if (line) line.classList.toggle("fold-hidden", collapsed);
+  }
+}
+
+function expandFoldsForLines(viewer, lineNos) {
+  if (!viewer || !lineNos || !lineNos.length) return;
+  const folds = Array.from(viewer.querySelectorAll(".json-fold"));
+  lineNos.forEach((no) => {
+    folds.forEach((f) => {
+      const s = Number(f.getAttribute("data-start"));
+      const e = Number(f.getAttribute("data-end"));
+      if (no >= s && no <= e && f.classList.contains("collapsed")) setFoldCollapsed(f, false);
+    });
+  });
+}
+
 function wireGlobalJsonInteractions() {
   document.addEventListener("click", (e) => {
     // 1) 折叠：gutter 的 ▼/▶
     const fold = e.target.closest(".json-fold");
     if (fold) {
       e.stopPropagation();
-      const end = Number(fold.getAttribute("data-end"));
-      const viewer = fold.closest(".json-viewer");
-      if (!viewer) return;
-      const openLine = fold.closest(".json-line");
-      const openLineNo = openLine ? Number(openLine.getAttribute("data-line")) : 0;
-      const collapsed = fold.classList.toggle("collapsed");
-      fold.textContent = collapsed ? "▶" : "▼";
-      if (openLine) openLine.classList.toggle("fold-collapsed", collapsed);
-      for (let i = openLineNo + 1; i <= end; i++) {
-        const line = viewer.querySelector(`.json-line[data-line="${i}"]`);
-        if (line) line.classList.toggle("fold-hidden", collapsed);
-      }
+      setFoldCollapsed(fold, !fold.classList.contains("collapsed"));
       return;
     }
     // 2) 字段级注释：✎
@@ -1645,7 +1773,28 @@ function wireGlobalJsonInteractions() {
       if (scope) openJsonMax(scope);
       return;
     }
-    // 8) 复制：code-copy 按钮
+    // 8) JSON 字段级复制
+    const jsonCopy = e.target.closest("[data-copy-json-path]");
+    if (jsonCopy) {
+      e.stopPropagation();
+      const viewer = jsonCopy.closest(".json-viewer");
+      const raw = viewer && viewer.getAttribute("data-raw");
+      const path = jsonCopy.getAttribute("data-copy-json-path");
+      if (raw && path) {
+        try {
+          const obj = JSON.parse(raw);
+          const val = getPath(obj, path);
+          let text;
+          if (val === undefined) text = "";
+          else if (val === null) text = "null";
+          else if (typeof val === "string") text = val;
+          else text = JSON.stringify(val);
+          copyText(text, jsonCopy);
+        } catch (err) { copyText("", jsonCopy); }
+      }
+      return;
+    }
+    // 9) 复制：code-copy 按钮
     const copy = e.target.closest("[data-copy]");
     if (copy) {
       e.stopPropagation();
@@ -1670,6 +1819,303 @@ function wireGlobalJsonInteractions() {
 // 直接克隆源 viewer（.json-viewer / .kv-viewer）进弹窗，全尺寸展示：
 // 折叠 / 复制 / 字段注释等交互由全局委托（wireGlobalJsonInteractions）自动生效，
 // 无需为弹窗重新绑定；bare viewer（无 code-wrap）的复制由弹窗「复制」按钮提供。
+// 「对比」是 JSON 组件的通用能力：任何 JSON 区最大化后，点顶部「对比」展开右侧面板，
+// 粘贴另一份 JSON 即可按字段 / 按行比对，差异直接高亮在左右两个 JSON 区里。
+// 下面对比引擎（flatten / diff / 高亮）与「最大化查看」同处一段，是按依赖顺序排的。
+function flattenJson(v, prefix, out) {
+  out = out || {};
+  if (v === null || typeof v !== "object") { out[prefix] = v; return out; }
+  if (Array.isArray(v)) {
+    if (!v.length) { out[prefix] = "[]"; return out; }
+    v.forEach((it, i) => flattenJson(it, prefix + "[" + i + "]", out));
+    return out;
+  }
+  const ks = Object.keys(v);
+  if (!ks.length) { out[prefix] = "{}"; return out; }
+  ks.forEach((k) => flattenJson(v[k], prefix ? prefix + "." + k : k, out));
+  return out;
+}
+
+function diffJsonStruct(a, b) {
+  const fa = flattenJson(a, "", {});
+  const fb = flattenJson(b, "", {});
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const keys = [];
+  Object.keys(fa).forEach((k) => { if (keys.indexOf(k) < 0) keys.push(k); });
+  Object.keys(fb).forEach((k) => { if (keys.indexOf(k) < 0) keys.push(k); });
+  const rows = [];
+  keys.forEach((k) => {
+    const inA = has(fa, k), inB = has(fb, k);
+    if (inA && !inB) rows.push({ kind: "removed", path: k, a: fa[k], b: undefined });
+    else if (!inA && inB) rows.push({ kind: "added", path: k, a: undefined, b: fb[k] });
+    else if (JSON.stringify(fa[k]) !== JSON.stringify(fb[k])) rows.push({ kind: "changed", path: k, a: fa[k], b: fb[k] });
+  });
+  return rows;
+}
+
+// ---- 对比引擎：两种模式 ----
+// 按字段：解析两侧 JSON → flatten 成「路径 → 值」，只比字段本身（忽略缩进与字段顺序）；
+// 按行：把两侧 JSON 还原成组件实际展示的文本行，做 LCS 对齐后逐行比。
+// 两种模式最终都产出「左 / 右 viewer 各要标哪些行」，差异直接在两个 JSON 区里高亮。
+function normDiffPath(p) {
+  let s = String(p).replace(/\[(\d+)\]/g, ".$1");
+  if (s.charAt(0) === ".") s = s.slice(1);
+  return s;
+}
+
+function viewerTextLines(viewer) {
+  const raw = viewer ? (viewer.getAttribute("data-raw") || "") : "";
+  let obj = null;
+  try { obj = JSON.parse(raw); } catch (e) { obj = null; }
+  const text = (obj !== null && typeof obj === "object") ? JSON.stringify(obj, null, 2) : raw;
+  return text.split("\n");
+}
+
+function diffLineMarks(A, B) {
+  const dp = [];
+  for (let i = 0; i <= A.length; i++) dp.push(new Array(B.length + 1).fill(0));
+  for (let i = A.length - 1; i >= 0; i--) {
+    for (let j = B.length - 1; j >= 0; j--) {
+      dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const ops = [];
+  let i = 0, j = 0;
+  while (i < A.length && j < B.length) {
+    if (A[i] === B[j]) { ops.push({ t: "same", i, j }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ t: "del", i }); i++; }
+    else { ops.push({ t: "add", j }); j++; }
+  }
+  while (i < A.length) { ops.push({ t: "del", i }); i++; }
+  while (j < B.length) { ops.push({ t: "add", j }); j++; }
+  const left = new Array(A.length).fill("");
+  const right = new Array(B.length).fill("");
+  let k = 0;
+  while (k < ops.length) {
+    if (ops[k].t === "same") { k++; continue; }
+    const del = [], add = [];
+    while (k < ops.length && ops[k].t !== "same") {
+      if (ops[k].t === "del") del.push(ops[k].i); else add.push(ops[k].j);
+      k++;
+    }
+    // 相邻的「删 + 增」成对 → 视为「值不同」；多余的算纯增/纯删
+    const pair = Math.min(del.length, add.length);
+    del.forEach((idx, x) => { left[idx] = x < pair ? "mod" : "del"; });
+    add.forEach((idx, y) => { right[idx] = y < pair ? "mod" : "add"; });
+  }
+  return { left, right };
+}
+
+function structDiffMarks(a, b) {
+  const left = new Map(), right = new Map();
+  let removed = 0, added = 0, changed = 0;
+  diffJsonStruct(a, b).forEach((r) => {
+    const p = normDiffPath(r.path);
+    if (r.kind === "removed") { left.set(p, "del"); removed++; }
+    else if (r.kind === "added") { right.set(p, "add"); added++; }
+    else { left.set(p, "mod"); right.set(p, "mod"); changed++; }
+  });
+  return { left, right, removed, added, changed };
+}
+
+function clearDiffMarks(viewer) {
+  if (!viewer) return;
+  Array.from(viewer.querySelectorAll(".diff-add, .diff-del, .diff-mod")).forEach((el) => {
+    el.classList.remove("diff-add", "diff-del", "diff-mod");
+  });
+}
+
+function markDiffByLine(viewer, marks) {
+  if (!viewer || !marks.size) return;
+  const nos = [];
+  marks.forEach((kind, no) => {
+    const line = viewer.querySelector(`.json-line[data-line="${no}"]`);
+    if (!line) return;
+    line.classList.add("diff-" + kind);
+    nos.push(no);
+  });
+  expandFoldsForLines(viewer, nos);
+}
+
+function markDiffByPath(viewer, marks) {
+  if (!viewer || !marks.size) return;
+  const nos = [];
+  Array.from(viewer.querySelectorAll(".json-line[data-path]")).forEach((line) => {
+    const kind = marks.get(line.getAttribute("data-path"));
+    if (!kind) return;
+    line.classList.add("diff-" + kind);
+    nos.push(Number(line.getAttribute("data-line")));
+  });
+  expandFoldsForLines(viewer, nos);
+}
+
+function currentJsonCompareMode() {
+  const b = document.querySelector("#jsonMaxBar .jm-mode.is-active");
+  return b ? b.getAttribute("data-jm-mode") : "field";
+}
+
+function setCompareMode(mode) {
+  Array.from(document.querySelectorAll("#jsonMaxBar .jm-mode")).forEach((b) => {
+    b.classList.toggle("is-active", b.getAttribute("data-jm-mode") === mode);
+  });
+}
+
+function setCompareStat(text, kind) {
+  const el = $("jsonMaxCompareStat");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove("ok", "warn");
+  if (kind) el.classList.add(kind);
+}
+
+function summaryText(removed, added, changed) {
+  const total = removed + added + changed;
+  if (!total) return { text: "两侧一致，无差异 ✓", kind: "ok" };
+  return { text: `共 ${total} 处差异：仅左侧 ${removed} · 仅右侧 ${added} · 值不同 ${changed}`, kind: "" };
+}
+
+function renderCompareViewer(text) {
+  const view = $("jsonMaxCompareView");
+  if (!view) return;
+  if (!String(text == null ? "" : text).trim()) { view.innerHTML = ""; view.classList.add("hide"); return; }
+  view.innerHTML = renderJsonGutter(text, { copyRaw: text, hideCopyBtn: true });
+  view.classList.remove("hide");
+}
+
+function setComparePaneMode(mode) {
+  const ta = $("jsonMaxCompareInput");
+  const view = $("jsonMaxCompareView");
+  const editBtn = $("jsonMaxCompareEdit");
+  if (!ta || !view) return;
+  const editing = mode === "edit" || !view.innerHTML.trim();
+  if (editing && ta.value.trim()) ta.value = pretty(ta.value);
+  ta.classList.toggle("hide", !editing);
+  view.classList.toggle("hide", editing);
+  if (editBtn) editBtn.classList.toggle("hide", editing);
+}
+
+function showCompareJson() {
+  const ta = $("jsonMaxCompareInput");
+  if (!ta) return false;
+  renderCompareViewer(ta.value);
+  const view = $("jsonMaxCompareView");
+  if (!view || !view.innerHTML.trim()) return false;
+  setComparePaneMode("preview");
+  return true;
+}
+
+function runJsonCompare() {
+  const leftViewer = $("jsonMaxBody") ? $("jsonMaxBody").querySelector(".json-viewer") : null;
+  const rightViewer = $("jsonMaxCompareView") ? $("jsonMaxCompareView").querySelector(".json-viewer") : null;
+  const ta = $("jsonMaxCompareInput");
+  if (!leftViewer || !rightViewer || !ta) return;
+  clearDiffMarks(leftViewer);
+  clearDiffMarks(rightViewer);
+  if (!String(ta.value || "").trim()) { setCompareStat("请先粘贴要对比的 JSON。", "warn"); return; }
+
+  if (currentJsonCompareMode() === "line") {
+    const d = diffLineMarks(viewerTextLines(leftViewer), viewerTextLines(rightViewer));
+    const lm = new Map(), rm = new Map();
+    let removed = 0, added = 0, changed = 0;
+    d.left.forEach((kind, idx) => {
+      if (!kind) return;
+      lm.set(idx + 1, kind);
+      if (kind === "del") removed++;
+      else if (kind === "mod") changed++;
+    });
+    d.right.forEach((kind, idx) => {
+      if (!kind) return;
+      rm.set(idx + 1, kind);
+      if (kind === "add") added++;
+    });
+    markDiffByLine(leftViewer, lm);
+    markDiffByLine(rightViewer, rm);
+    const s = summaryText(removed, added, changed);
+    setCompareStat(s.text, s.kind);
+    return;
+  }
+
+  let a = null, b = null;
+  try { a = JSON.parse(leftViewer.getAttribute("data-raw") || ""); } catch (e) { a = null; }
+  try { b = JSON.parse(rightViewer.getAttribute("data-raw") || ""); } catch (e) { b = null; }
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
+    setCompareStat("字段对比需要两侧都是合法 JSON 对象，可切到「按行」做严格文本对比。", "warn");
+    return;
+  }
+  const d = structDiffMarks(a, b);
+  markDiffByPath(leftViewer, d.left);
+  markDiffByPath(rightViewer, d.right);
+  const s = summaryText(d.removed, d.added, d.changed);
+  setCompareStat(s.text, s.kind);
+}
+
+function resetJsonCompare() {
+  const ta = $("jsonMaxCompareInput");
+  if (ta) ta.value = "";
+  const view = $("jsonMaxCompareView");
+  if (view) { view.innerHTML = ""; view.classList.add("hide"); }
+  setCompareMode("field");
+  setComparePaneMode("edit");
+  clearDiffMarks($("jsonMaxBody") ? $("jsonMaxBody").querySelector(".json-viewer") : null);
+  setCompareStat("粘贴另一份 JSON 后点「对比」，差异会在左右两侧 JSON 区里高亮。", "");
+}
+
+// 预览页（design/detail-preview.html）复用同一套对比引擎：
+// 这里把引擎函数按源码序列化出去，避免预览页再抄一份逻辑而与真实行为不一致。
+function jsonCompareEngineSource() {
+  const fns = [
+    normDiffPath, viewerTextLines, diffLineMarks, flattenJson, diffJsonStruct, structDiffMarks,
+    setFoldCollapsed, expandFoldsForLines, clearDiffMarks, markDiffByLine, markDiffByPath,
+    esc, computeJsonPaths, highlightJsonLine, renderJsonGutter,
+    currentJsonCompareMode, setCompareMode, setCompareStat, summaryText,
+    renderCompareViewer, setComparePaneMode, showCompareJson, runJsonCompare, resetJsonCompare,
+    setCompareOpen, toggleCompare, linkCompareScroll,
+  ];
+  return "var $ = function (id) { return document.getElementById(id); };\n" +
+    fns.map((f) => f.toString()).join("\n\n");
+}
+
+// 对比面板默认收起：最大化弹窗顶部的「对比」按钮点击展开 / 收起。
+// 对比是 JSON 组件的通用能力 —— 任何能最大化的 JSON 区，最大化后都能和另一份 JSON 对比。
+function setCompareOpen(open) {
+  const pane = $("jsonMaxCompare");
+  if (pane) pane.classList.toggle("hide", !open);
+  const bar = $("jsonMaxBar");
+  if (bar) bar.classList.toggle("hide", !open);
+  const btn = $("jsonMaxCompareBtn");
+  if (btn) {
+    btn.classList.toggle("is-active", open);
+    btn.textContent = open ? "收起对比" : "对比";
+  }
+}
+
+// 左右两栏滚动联动：任一栏滚动，另一栏同步到相同位置（git-diff 式并排浏览）
+function linkCompareScroll() {
+  const a = $("jsonMaxBody");
+  const b = $("jsonMaxCompareView");
+  if (!a || !b || a._cmpScrollLinked) return;
+  a._cmpScrollLinked = true;
+  b._cmpScrollLinked = true;
+  let lock = false;
+  const raf = (typeof requestAnimationFrame === "function")
+    ? requestAnimationFrame
+    : (fn) => setTimeout(fn, 0);
+  const sync = (src, dst) => {
+    if (lock) return;
+    lock = true;
+    dst.scrollTop = src.scrollTop;
+    dst.scrollLeft = src.scrollLeft;
+    raf(() => { lock = false; });
+  };
+  a.addEventListener("scroll", () => sync(a, b), { passive: true });
+  b.addEventListener("scroll", () => sync(b, a), { passive: true });
+}
+
+function toggleCompare() {
+  const pane = $("jsonMaxCompare");
+  setCompareOpen(pane ? pane.classList.contains("hide") : true);
+}
+
 function openJsonMax(scopeEl) {
   if (!scopeEl) return;
   const viewer = scopeEl.querySelector(".json-viewer, .kv-viewer");
@@ -1684,6 +2130,11 @@ function openJsonMax(scopeEl) {
     const t = scopeEl.querySelector(".db-title, .mock-card-section-title, .mock-log-sub");
     title.textContent = t ? t.textContent.trim() : "最大化查看";
   }
+  // 只有 JSON 组件才谈得上对比（键值对没有「字段路径」可比）
+  const cmpBtn = $("jsonMaxCompareBtn");
+  if (cmpBtn) cmpBtn.classList.toggle("hide", !clone.classList.contains("json-viewer"));
+  setCompareOpen(false);
+  resetJsonCompare();
   const modal = $("jsonMaxModal");
   if (modal) modal.classList.remove("hide");
 }
@@ -1691,6 +2142,7 @@ function openJsonMax(scopeEl) {
 function closeJsonMax() {
   const modal = $("jsonMaxModal");
   if (modal) modal.classList.add("hide");
+  setCompareOpen(false);
   const body = $("jsonMaxBody");
   if (body) body.innerHTML = "";
 }
@@ -1706,6 +2158,38 @@ function wireJsonMaxModal() {
     const holder = v && v.querySelector("[data-raw]");
     if (holder) copyText(holder.getAttribute("data-raw") || "", copy);
   });
+  const cmpToggle = $("jsonMaxCompareBtn");
+  if (cmpToggle) cmpToggle.addEventListener("click", toggleCompare);
+  const cmpInput = $("jsonMaxCompareInput");
+  const cmpRun = $("jsonMaxCompareRun");
+  if (cmpRun) cmpRun.addEventListener("click", () => { if (showCompareJson()) runJsonCompare(); });
+  const cmpEdit = $("jsonMaxCompareEdit");
+  if (cmpEdit) cmpEdit.addEventListener("click", () => setComparePaneMode("edit"));
+  const cmpClear = $("jsonMaxCompareClear");
+  if (cmpClear) cmpClear.addEventListener("click", resetJsonCompare);
+  if (cmpInput) {
+    cmpInput.addEventListener("paste", () => {
+      setTimeout(() => { if (showCompareJson()) runJsonCompare(); }, 0);
+    });
+    let t = null;
+    cmpInput.addEventListener("input", () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const view = $("jsonMaxCompareView");
+        if (view && !view.classList.contains("hide") && cmpInput.value.trim()) {
+          renderCompareViewer(cmpInput.value);
+          runJsonCompare();
+        }
+      }, 250);
+    });
+  }
+  Array.from(modal.querySelectorAll("#jsonMaxBar .jm-mode")).forEach((b) => {
+    b.addEventListener("click", () => {
+      setCompareMode(b.getAttribute("data-jm-mode"));
+      if (cmpInput && cmpInput.value.trim() && showCompareJson()) runJsonCompare();
+    });
+  });
+  linkCompareScroll();
   modal.addEventListener("click", (e) => { if (e.target === modal) closeJsonMax(); });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !modal.classList.contains("hide")) closeJsonMax();
@@ -1856,6 +2340,7 @@ if (exportBtn) exportBtn.addEventListener("click", () => go("export"));
 
 wireEditReqModal();
 wireEditResModal();
+wireJsonEdits();
 wireGlobalJsonInteractions();
 wireJsonMaxModal();
 
