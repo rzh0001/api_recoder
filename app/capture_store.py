@@ -3,6 +3,7 @@
 
 每条记录由 browser_manager 解析 DrissionPage 的 DataPacket 后写入，结构见 _packet_to_record。
 """
+import base64
 import copy
 import json
 import os
@@ -72,6 +73,32 @@ def jsonable_body(body):
         return text, len(text.encode("utf-8", "replace"))
     text = body if isinstance(body, str) else str(body)
     return text, len(text.encode("utf-8", "replace"))
+
+
+def parse_body_full(body):
+    """把响应/请求体解析为可存储三元组。
+
+    返回 (text, b64, is_binary, size)：
+    - 文本/JSON/None：text 为字符串（JSON 已序列化）或 None，b64=None，is_binary=False；
+    - 二进制 bytes：text=None，b64 为 base64 字符串，is_binary=True。
+    二进制侧字段用于 Mock 回放真实下载、详情页下载文件。
+    """
+    if body is None:
+        return None, None, False, 0
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            b64 = base64.b64encode(bytes(body)).decode("ascii")
+        except Exception:
+            b64 = None
+        return None, b64, True, len(body)
+    if isinstance(body, (dict, list)):
+        try:
+            text = json.dumps(body, ensure_ascii=False)
+        except Exception:
+            text = str(body)
+        return text, None, False, len(text.encode("utf-8", "replace"))
+    text = body if isinstance(body, str) else str(body)
+    return text, None, False, len(text.encode("utf-8", "replace"))
 
 
 # 脱敏默认映射：未提供配置时使用。
@@ -246,6 +273,11 @@ class CaptureStore:
                 if n > MAX_BODY_STORE:
                     resp["body"] = b[:MAX_BODY_STORE] + "\n... [truncated for memory]"
                     resp["truncated"] = True
+            elif resp.get("is_binary"):
+                b64 = resp.get("body_b64")
+                if isinstance(b64, str) and len(b64) * 3 // 4 > MAX_BODY_STORE:
+                    resp["body_b64"] = None
+                    resp["truncated"] = True
 
             self.by_seq[seq] = record
             self.requests.append(record)
@@ -380,10 +412,11 @@ class CaptureStore:
             "tags": stored.get("tags") if stored.get("tags") is not None else fallback.get("tags", []),
             "req": stored.get("req") if stored.get("req") is not None else [],
             "resp": stored.get("resp") if stored.get("resp") is not None else [],
+            "match_fields": stored.get("match_fields") if stored.get("match_fields") is not None else [],
         }
         return doc
 
-    def set_endpoint_doc(self, method, path, name=None, note=None, tags=None, req=None, resp=None):
+    def set_endpoint_doc(self, method, path, name=None, note=None, tags=None, req=None, resp=None, match_fields=None):
         """更新接口级文档。None 表示不改该字段。返回当前完整文档。"""
         with self._lock:
             key = self._endpoint_key(method, path)
@@ -398,6 +431,8 @@ class CaptureStore:
                 doc["req"] = list(req)
             if resp is not None:
                 doc["resp"] = list(resp)
+            if match_fields is not None:
+                doc["match_fields"] = list(match_fields)
             doc["updated_at"] = time.time()
             self.endpoint_docs[key] = doc
         self._schedule_persist()
@@ -415,15 +450,19 @@ class CaptureStore:
                     "tags": list(v.get("tags") or []),
                     "req": list(v.get("req") or []),
                     "resp": list(v.get("resp") or []),
+                    "match_fields": list(v.get("match_fields") or []),
                 }
                 for k, v in self.endpoint_docs.items()
             ]
 
     # ---------- 轻量拷贝（用于 WebSocket 实时推送） ----------
     def light(self, rec):
-        """返回一份 body 截断到 MAX_BODY_WS 的副本，减小实时推送体积。"""
+        """返回一份 body 截断到 MAX_BODY_WS 的副本，减小实时推送体积。
+        二进制 base64 / 挂文件 b64 体量大且不用于列表展示，快照里剔除（详情按需拉全量）。"""
         r = dict(rec)
+        r.pop("mock_file", None)
         resp = dict(rec.get("response") or {})
+        resp.pop("body_b64", None)
         b = resp.get("body")
         if isinstance(b, str):
             n = len(b.encode("utf-8", "replace"))
@@ -489,10 +528,14 @@ class CaptureStore:
                     "mock_pin": bool(r.get("mock_pin")),
                     "url": r.get("url") or "",
                     "req_body": req.get("post_data"),
+                    "mock_file": r.get("mock_file"),
                     "response": {
                         "status": resp.get("status", 200),
                         "headers": resp.get("headers") or {},
                         "body": resp.get("body"),
+                        "body_b64": resp.get("body_b64"),
+                        "is_binary": bool(resp.get("is_binary")),
+                        "mime_type": resp.get("mime_type"),
                     },
                 })
             return out

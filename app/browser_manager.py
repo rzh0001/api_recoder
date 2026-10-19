@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import tldextract
 from DrissionPage import ChromiumOptions, ChromiumPage
 
-from .capture_store import jsonable_body
+from .capture_store import jsonable_body, parse_body_full
 from .config import (
     BUNDLED_CHROME,
     CHROMIUM_DIR,
@@ -263,6 +263,8 @@ class BrowserManager:
         resp_headers = {}
         encoded = None
         resp_body_text = None
+        resp_body_b64 = None
+        resp_is_binary = False
         resp_body_size = 0
         if raw_resp:
             status = raw_resp.get("status")
@@ -278,7 +280,7 @@ class BrowserManager:
                 body = packet.response.body
             except Exception:
                 body = None
-            resp_body_text, resp_body_size = jsonable_body(body)
+            resp_body_text, resp_body_b64, resp_is_binary, resp_body_size = parse_body_full(body)
 
         size = encoded if isinstance(encoded, int) else resp_body_size
         duration = None
@@ -309,6 +311,8 @@ class BrowserManager:
                 "headers": resp_headers,
                 "mime_type": mime,
                 "body": resp_body_text,
+                "body_b64": resp_body_b64,
+                "is_binary": resp_is_binary,
                 "body_size": resp_body_size,
                 "size_bytes": size if size is not None else resp_body_size,
             },

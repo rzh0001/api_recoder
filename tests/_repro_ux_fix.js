@@ -6,7 +6,8 @@ const { JSDOM } = require("jsdom");
 const ROOT = "E:/api_recoder";
 const html = fs.readFileSync(path.join(ROOT, "static/index.html"), "utf8");
 const js = fs.readFileSync(path.join(ROOT, "static/app.js"), "utf8");
-const htmlWithScript = html.replace("</body>", `<script>${js}</script></body>`);
+const v3 = fs.readFileSync(path.join(ROOT, "static/v3.js"), "utf8");
+const htmlWithScript = html.replace("</body>", `<script>${js}</script><script>${v3}</script></body>`);
 
 const REC = {
   seq: 1,
@@ -142,36 +143,28 @@ setTimeout(() => {
       if (gotoLib) {
         gotoLib.dispatchEvent(new window.Event("click", { bubbles: true }));
         setTimeout(() => {
-          const libActive = d.querySelector('.screen[data-screen="library"]').classList.contains("active");
-          assert("点「请求库」跳到请求库页", libActive);
-          assert("请求库定位到该接口", window.libState.path === "/v1/login" && window.libState.method === "POST",
+          // v3：请求库入口改为跳到「接口工作台」
+          const workActive = !d.getElementById("workView").classList.contains("hide");
+          assert("点「请求库」跳到接口工作台", workActive);
+          assert("工作台定位到该接口", window.libState.path === "/v1/login" && window.libState.method === "POST",
             { path: window.libState.path, method: window.libState.method });
 
-          // ---- 6) 联动：请求库案例 → 录制页定位 ----
-          window.renderLibrary();
-          const caseRow = d.querySelector(".case-row");
-          if (caseRow) {
-            caseRow.dispatchEvent(new window.Event("click", { bubbles: true }));
-            setTimeout(() => {
-              const jump = d.querySelector("[data-jump-seq]");
-              assert("案例展开有「在录制中定位」", !!jump);
-              const pin = d.querySelector("[data-pin-seq]");
-              assert("案例展开有「固定为 Mock 返回」", !!pin);
-
-              // ---- 7) 联动：固定到 Mock ----
-              if (pin) {
-                calls.length = 0;
-                pin.dispatchEvent(new window.Event("click", { bubbles: true }));
-                setTimeout(() => {
-                  const pinCall = calls.find((c) => c.url.indexOf("/api/mock/pin") >= 0 && c.body.indexOf('"pinned":true') >= 0);
-                  assert("固定动作发送 /api/mock/pin", !!pinCall, calls);
-                  assert("运行期无 JS 错误", jsErrors.length === 0, jsErrors.slice(0, 3));
-                  console.log(`\nRESULT pass=${pass} fail=${fail}`);
-                  process.exit(fail ? 1 : 0);
-                }, 60);
-              } else { finish(); }
-            }, 60);
-          } else { console.log("  （无案例行）"); finish(); }
+          // ---- 6) 联动：工作台样本详情 →「固定为 Mock」 ----
+          setTimeout(() => {
+            const pin = d.getElementById("sdPin");
+            assert("样本详情有「固定为 Mock」", !!pin);
+            if (pin) {
+              calls.length = 0;
+              pin.dispatchEvent(new window.Event("click", { bubbles: true }));
+              setTimeout(() => {
+                const pinCall = calls.find((c) => c.url.indexOf("/api/mock/pin") >= 0 && c.body.indexOf('"pinned":true') >= 0);
+                assert("固定动作发送 /api/mock/pin", !!pinCall, calls);
+                assert("运行期无 JS 错误", jsErrors.length === 0, jsErrors.slice(0, 3));
+                console.log(`\nRESULT pass=${pass} fail=${fail}`);
+                process.exit(fail ? 1 : 0);
+              }, 60);
+            } else { finish(); }
+          }, 60);
         }, 60);
       } else { finish(); }
     }, 30);

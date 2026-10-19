@@ -17,7 +17,7 @@ from flask_sock import Sock
 
 from . import state
 from .capture_store import _registered_domain
-from .config import HOST, PORT, MOCK_PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG, EXPORT_DIR, _load_user_config
+from .config import HOST, PORT, MOCK_PORT, PORT_CANDIDATES, STATIC_DIR, CONFIG_FILE, USER_CONFIG, EXPORT_DIR, _load_user_config, MAX_BODY_STORE
 
 
 def resolve_port(preferred=None):
@@ -48,6 +48,16 @@ def resolve_port(preferred=None):
 
 app = Flask(__name__, static_folder=None)
 sock = Sock(app)
+
+
+@app.after_request
+def _no_cache_api(resp):
+    p = request.path
+    if p == "/" or p.startswith("/api/") or p.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+    return resp
 
 
 # ---------------- 页面 / 静态资源 ----------------
@@ -339,7 +349,7 @@ def api_endpoint_doc():
         return _json_err("缺少有效的 path", 400)
 
     write_fields = {}
-    for k in ("name", "note", "tags", "req", "resp"):
+    for k in ("name", "note", "tags", "req", "resp", "match_fields"):
         if k in data:
             write_fields[k] = data.get(k)
     if write_fields:
@@ -554,6 +564,19 @@ def _save_export_file(text, filename):
     return str(dst.resolve())
 
 
+def _save_export_bytes(raw, filename):
+    """把二进制字节写到 EXPORT_DIR（避免重名覆盖），返回绝对路径。"""
+    dst = EXPORT_DIR / filename
+    if dst.exists():
+        stem, ext = os.path.splitext(filename)
+        i = 1
+        while (EXPORT_DIR / f"{stem}({i}){ext}").exists():
+            i += 1
+        dst = EXPORT_DIR / f"{stem}({i}){ext}"
+    dst.write_bytes(raw)
+    return str(dst.resolve())
+
+
 @app.post("/api/export/save")
 def api_export_save():
     """导出并直接落盘到 EXPORT_DIR，返回绝对路径（可靠、不依赖 WebView2 下载）。"""
@@ -600,12 +623,21 @@ def _subprocess_explorer(p):
 
 @app.post("/api/file/save")
 def api_file_save():
-    """把任意文本/二进制内容（如单条响应体「下载文件」）落盘到 EXPORT_DIR，返回绝对路径。"""
+    """把任意文本/二进制内容（如单条响应体「下载文件」）落盘到 EXPORT_DIR，返回绝对路径。
+    文本走 content；二进制走 b64（decode 后按字节落盘，保留原始文件）。"""
     data = request.get_json(silent=True) or {}
     content = data.get("content")
-    if content is None:
-        return _json_err("缺少 content", 400)
-    filename = (data.get("filename") or "download.txt").replace("\\", "_").replace("/", "_")
+    b64 = data.get("b64")
+    if content is None and b64 is None:
+        return _json_err("缺少 content 或 b64", 400)
+    filename = (data.get("filename") or "download.bin").replace("\\", "_").replace("/", "_")
+    if b64 is not None:
+        try:
+            raw = base64.b64decode(b64)
+        except Exception as e:
+            return _json_err("b64 解码失败：%s" % e, 400)
+        path = _save_export_bytes(raw, filename)
+        return Response(json.dumps({"ok": True, "path": path}, ensure_ascii=False), mimetype="application/json")
     # 内容可能含非 BMP 字符，统一以 utf-8 写文本
     path = _save_export_file(str(content), filename)
     return Response(json.dumps({"ok": True, "path": path}, ensure_ascii=False), mimetype="application/json")
@@ -621,7 +653,9 @@ MOCK_TEMPLATE = r'''#!/usr/bin/env python
 # 匹配规则：先按 method + path + query 精确匹配；未命中则按 method + path 匹配；
 #          仍无命中返回 404。响应体 / 状态码 / 响应头均来自录制。
 import argparse
+import base64
 import json
+from urllib.parse import quote
 
 from flask import Flask, request, Response
 
@@ -629,6 +663,14 @@ DATA = __DATA__
 
 app = Flask(__name__)
 EXCLUDE_HEADERS = {"content-length", "content-encoding", "transfer-encoding", "connection"}
+
+
+def _content_disposition(filename):
+    name = str(filename or "download")
+    return "attachment; filename=\"%s\"; filename*=UTF-8''%s" % (
+        name.encode("ascii", "replace").decode("ascii"),
+        quote(name, safe=""),
+    )
 
 
 def _norm(p):
@@ -653,11 +695,38 @@ def mock(path):
     if not m:
         return Response("", status=404, headers={"Content-Type": "text/plain; charset=utf-8"})
     resp = m.get("response") or {}
+    status = resp.get("status", 200)
+    headers = {k: v for k, v in (resp.get("headers") or {}).items() if k.lower() not in EXCLUDE_HEADERS}
+
+    # 手动挂的文件优先：合成下载头
+    mf = m.get("mock_file")
+    serve_bytes = None
+    if isinstance(mf, dict) and mf.get("b64"):
+        try:
+            serve_bytes = base64.b64decode(mf["b64"])
+        except Exception:
+            serve_bytes = None
+        if isinstance(serve_bytes, bytes):
+            fname = mf.get("filename") or "download"
+            mime = (str(mf.get("mime") or "").split(";")[0].strip()) or headers.get("Content-Type") or "application/octet-stream"
+            headers["Content-Type"] = mime
+            headers["Content-Disposition"] = _content_disposition(fname)
+    elif resp.get("is_binary") and resp.get("body_b64"):
+        try:
+            serve_bytes = base64.b64decode(resp["body_b64"])
+        except Exception:
+            serve_bytes = None
+
+    if isinstance(serve_bytes, bytes):
+        if not headers.get("Content-Type"):
+            headers["Content-Type"] = resp.get("mime_type") or "application/octet-stream"
+        headers["Content-Length"] = str(len(serve_bytes))
+        return Response(serve_bytes, status=status, headers=headers)
+
     body = resp.get("body") or ""
     if not isinstance(body, str):
         body = json.dumps(body, ensure_ascii=False)
-    headers = {k: v for k, v in (resp.get("headers") or {}).items() if k.lower() not in EXCLUDE_HEADERS}
-    return Response(body, status=resp.get("status", 200), headers=headers)
+    return Response(body, status=status, headers=headers)
 
 
 def main():
@@ -686,10 +755,14 @@ def _mock_records():
             "method": r.get("method"),
             "path": r.get("path") or "",
             "query": r.get("query") or "",
+            "mock_file": r.get("mock_file"),
             "response": {
                 "status": resp.get("status", 200),
                 "headers": resp.get("headers") or {},
                 "body": resp.get("body"),
+                "body_b64": resp.get("body_b64"),
+                "is_binary": bool(resp.get("is_binary")),
+                "mime_type": resp.get("mime_type"),
             },
         })
     return out
@@ -912,6 +985,119 @@ def api_mock_pin():
             json.dumps({"ok": False, "error": "记录不存在"}, ensure_ascii=False),
             status=400, mimetype="application/json",
         )
+    state.mock_manager.rebuild()
+    return Response(json.dumps({"ok": True}, ensure_ascii=False), mimetype="application/json")
+
+
+@app.post("/api/mock/make")
+def api_mock_make():
+    """凭空造一条 Mock：合成一条 XHR 记录写入录制库并立即固定为默认返回。
+    请求体：{"method","path","query"?,"req_body"?,"res_status"?,"res_body"?,"res_headers"?,"host"?}。"""
+    data = request.get_json(silent=True) or {}
+    method = str(data.get("method") or "GET").upper()
+    path = str(data.get("path") or "").strip()
+    if not path:
+        return Response(
+            json.dumps({"ok": False, "error": "path 必填"}, ensure_ascii=False),
+            status=400, mimetype="application/json",
+        )
+    if not path.startswith("/"):
+        path = "/" + path
+    query = str(data.get("query") or "").strip()
+    req_body = data.get("req_body")
+    if req_body is not None and not isinstance(req_body, str):
+        req_body = json.dumps(req_body, ensure_ascii=False)
+    try:
+        status = int(data.get("res_status") or data.get("status") or 200)
+    except Exception:
+        status = 200
+    res_body = data.get("res_body")
+    if res_body is None:
+        res_body = ""
+    if not isinstance(res_body, str):
+        res_body = json.dumps(res_body, ensure_ascii=False)
+    res_headers = data.get("res_headers") or {}
+    if not isinstance(res_headers, dict):
+        res_headers = {}
+    if not any(str(k).lower() == "content-type" for k in res_headers):
+        res_headers["Content-Type"] = "application/json; charset=utf-8"
+    host = str(data.get("host") or "mock.local")
+    scheme = str(data.get("scheme") or "http")
+    url = "%s://%s%s%s" % (scheme, host, path, ("?" + query) if query else "")
+    body_size = len(res_body.encode("utf-8", "replace"))
+    record = {
+        "method": method,
+        "url": url,
+        "path": path,
+        "query": query,
+        "host": host,
+        "registered_domain": host,
+        "resource_type": "XHR",
+        "is_failed": False,
+        "duration_ms": 0,
+        "request": {"headers": {}, "post_data": req_body},
+        "response": {
+            "status": status,
+            "status_text": "",
+            "headers": res_headers,
+            "body": res_body,
+            "mime_type": res_headers.get("Content-Type", "application/json"),
+            "body_size": body_size,
+            "size_bytes": body_size,
+        },
+        "timing": {},
+        "synthetic": True,
+    }
+    seq = state.store.add(record)
+    state.store.set_pin(seq, True)
+    state.store.notify_changed()
+    state.mock_manager.rebuild()
+    return Response(json.dumps({"ok": True, "seq": seq}, ensure_ascii=False), mimetype="application/json")
+
+
+@app.post("/api/mock/file")
+def api_mock_file():
+    """给某条记录挂一个本地文件作为 Mock 下载内容（覆盖录制响应体，优先返回该文件）。
+    请求体：{"seq": N, "filename": str, "mime": str, "b64": str}"""
+    data = request.get_json(silent=True) or {}
+    seq = data.get("seq")
+    if not isinstance(seq, int) or seq <= 0:
+        return _json_err("缺少有效的 seq", 400)
+    rec = state.store.get(seq)
+    if rec is None:
+        return _json_err("记录不存在或已删除", 404)
+    b64 = data.get("b64")
+    if not isinstance(b64, str) or not b64:
+        return _json_err("缺少 b64 文件内容", 400)
+    try:
+        raw = base64.b64decode(b64)
+    except Exception as e:
+        return _json_err("b64 解码失败：%s" % e, 400)
+    if len(raw) > MAX_BODY_STORE:
+        return _json_err("文件过大（超过 %d 字节）" % MAX_BODY_STORE, 400)
+    rec["mock_file"] = {
+        "filename": data.get("filename") or "download.bin",
+        "mime": data.get("mime") or "application/octet-stream",
+        "b64": b64,
+        "size": len(raw),
+    }
+    state.store.notify_changed()
+    state.mock_manager.rebuild()
+    return Response(json.dumps({"ok": True}, ensure_ascii=False), mimetype="application/json")
+
+
+@app.post("/api/mock/file/clear")
+def api_mock_file_clear():
+    """移除某条记录上挂的 Mock 下载文件。请求体：{"seq": N}"""
+    data = request.get_json(silent=True) or {}
+    seq = data.get("seq")
+    if not isinstance(seq, int) or seq <= 0:
+        return _json_err("缺少有效的 seq", 400)
+    rec = state.store.get(seq)
+    if rec is None:
+        return _json_err("记录不存在或已删除", 404)
+    rec.pop("mock_file", None)
+    state.store.notify_changed()
     state.mock_manager.rebuild()
     return Response(json.dumps({"ok": True}, ensure_ascii=False), mimetype="application/json")
 

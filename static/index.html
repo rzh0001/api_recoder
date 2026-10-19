@@ -8,41 +8,63 @@
 </head>
 <body>
   <div class="app">
-    <!-- ============ 侧边导航 ============ -->
-    <aside class="sidebar">
-      <div class="brand"><span class="logo">🍶</span> API Recorder</div>
-      <nav class="nav">
-        <div class="nav-item" data-go="overview"><span class="nav-ic">🏠</span> 概览</div>
-        <div class="nav-item active" data-go="recording"><span class="nav-ic">📡</span> 录制 <span class="nav-badge" id="navRecBadge">0</span></div>
-        <div class="nav-item" data-go="mock"><span class="nav-ic">🧪</span> Mock <span class="nav-badge" id="navMockBadge">0</span></div>
-        <div class="nav-item" data-go="library"><span class="nav-ic">📚</span> 请求库</div>
-        <div class="nav-item" data-go="export"><span class="nav-ic">📤</span> 导出</div>
-        <div class="nav-item" data-go="settings"><span class="nav-ic">⚙</span> 设置</div>
-      </nav>
-      <div class="nav-foot">
-        <div><span class="rec-dot" id="navRecDot"></span><span id="navRecText">空闲</span></div>
-      </div>
-    </aside>
+    <!-- ============ 顶栏：细状态条 ============ -->
+    <header class="topbar">
+      <div class="brand-sm"><span class="logo">🍶</span> API Recorder</div>
+      <div class="view-title" id="viewTitle">接口台账</div>
+      <div class="spacer"></div>
 
-    <!-- ============ 主区 ============ -->
-    <div class="content">
-      <div class="topbar">
-        <div>
-          <div class="top-title" id="topTitle">录制</div>
-          <div class="top-sub" id="topSub">拉起浏览器，按域名实时组织所有请求</div>
+      <button class="chip rec" id="recChip" title="录制引擎"><span class="dot"></span><span id="recChipTxt">录制</span></button>
+      <button class="chip mock" id="mockChip" title="Mock 引擎">🧪 <span id="mockChipTxt">Mock</span></button>
+      <button class="chip inbox hide" id="inboxChip" title="待造数据（未命中请求）">📥 <span id="inboxChipTxt">待造 0</span></button>
+      <button class="chip menu" id="menuChip" title="更多">⋯</button>
+
+      <!-- 录制气泡 -->
+      <div class="pop" id="recPop">
+        <div class="pop-head">录制引擎</div>
+        <div class="pop-row"><label>状态</label><span id="recPopState">空闲</span></div>
+        <div class="pop-actions">
+          <button id="recPopStart" class="btn btn-primary btn-sm">● 开始录制</button>
+          <button id="recPopStop" class="btn btn-sm" disabled>■ 停止</button>
         </div>
-        <div class="spacer"></div>
-        <button class="cmdk-trigger" id="cmdkTrigger">🔍 搜索 / 命令 <kbd>Ctrl K</kbd></button>
       </div>
 
-      <div class="screens">
-        <!-- ============ 概览 ============ -->
-        <section class="screen" data-screen="overview" id="screenOverview">
-          <div class="screen-pad" id="overviewPad"></div>
-        </section>
+      <!-- Mock 气泡 -->
+      <div class="pop" id="mockPop">
+        <div class="pop-head">Mock 引擎</div>
+        <div class="pop-row"><label>端口</label><input id="mockPortInput2" class="input input-sm" maxlength="6" placeholder="自动" title="仅本次启动 Mock 生效；持久化端口请在「设置」里配置" /></div>
+        <div class="pop-row"><label>地址</label><a id="mockApisUrl" href="#" target="_blank" rel="noopener">—</a></div>
+        <div class="pop-row"><label>严格</label><label class="check"><input type="checkbox" id="mockStrictToggle" checked /> 严格模式</label></div>
+        <div class="pop-actions">
+          <button id="startMock" class="btn btn-primary btn-sm">▶ 启动</button>
+          <button id="stopMock" class="btn btn-sm" disabled>■ 停止</button>
+          <button id="mockRefreshBtn" class="btn btn-sm">刷新</button>
+        </div>
+        <div class="pop-link" id="mockLogsOpen">查看处理记录 →</div>
+      </div>
 
-        <!-- ============ 录制（原 panelApi，保留全部 ID）============ -->
-        <section class="screen active" data-screen="recording" id="panelApi">
+      <!-- 菜单气泡 -->
+      <div class="pop" id="menuPop">
+        <div class="pop-item" id="menuExport">📤 导出</div>
+        <div class="pop-item" id="menuImport">📂 导入 HAR / JSON</div>
+        <div class="pop-item" id="menuSettings">⚙ 设置</div>
+        <div class="pop-item danger" id="menuClear">🗑 清空录制</div>
+        <div class="pop-note">按 Ctrl K 打开命令面板</div>
+      </div>
+    </header>
+
+    <div class="body">
+      <!-- ============ 中栏：统一分 Tab 的工作区 ============ -->
+      <main class="stage">
+        <div class="center-tabs" id="centerTabs">
+          <button class="tab-switch active" data-ctab="history">请求历史</button>
+          <button class="tab-switch" data-ctab="ledger">接口台账</button>
+          <button class="tab-switch" data-ctab="mock">Mock</button>
+          <button class="tab-switch" data-ctab="export">导出</button>
+        </div>
+
+        <!-- 请求历史：录制控制 + 过滤 + 域名分组树 -->
+        <section class="center-pane" id="paneHistory">
           <div class="api-toolbar">
             <label class="field">
               <span>内核</span>
@@ -51,7 +73,6 @@
                 <option value="local">本机浏览器</option>
               </select>
             </label>
-
             <label class="field hide" id="localBrowserField">
               <span>浏览器</span>
               <select id="localBrowser">
@@ -60,14 +81,11 @@
                 <option value="edge">Edge</option>
               </select>
             </label>
-
             <input id="localPath" class="input hide" placeholder="本机 Chrome/Edge 路径（可选，留空则按上面选择）" />
-
             <label class="field">
               <span>起始 URL</span>
               <input id="startUrl" class="input" placeholder="about:blank" />
             </label>
-
             <button id="startBtn" class="btn btn-primary">● 开始录制</button>
             <button id="stopBtn" class="btn" disabled>■ 停止</button>
             <button id="clearBtn" class="btn">清空</button>
@@ -115,119 +133,141 @@
             </select>
           </div>
 
+          <div class="tree-head">请求历史 <span class="muted">（所有录制请求按域名分组 · 点上方「仅错误」只看 4xx/5xx）</span></div>
           <main class="main">
             <div id="tree" class="tree">
               <div class="empty">点击「开始录制」拉起浏览器，这里会按域名实时组织所有请求。</div>
             </div>
             <aside id="detail" class="detail">
-              <div class="empty">选择左侧任意请求查看详情。</div>
+              <div class="empty">选中上方请求查看详情；点「接口台账」按 method+path 汇总接口。</div>
             </aside>
           </main>
         </section>
 
-        <!-- ============ Mock（原 panelMock，保留全部 ID）============ -->
-        <section class="screen" data-screen="mock" id="panelMock">
-          <div class="subbar">
-            <label class="mock-port">端口 <input id="mockPortInput2" class="input input-sm" maxlength="6" placeholder="自动" title="仅本次启动 Mock 生效，不保存到配置；持久化端口请在「设置」里配置" /></label>
-            <span class="mock-apis-url">Mock 地址：<a id="mockApisUrl" href="#" target="_blank" rel="noopener">—</a></span>
-            <div class="mock-strict-toggle">
-              <label>
-                <input type="checkbox" id="mockStrictToggle" checked />
-                <span class="checkmark"></span>
-                严格模式
-              </label>
+        <!-- 接口台账：按 method+path 汇总，点接口进工作台 -->
+        <section class="center-pane hide" id="paneLedger">
+          <div id="ledgerList" class="ledger-list">
+            <div class="side-head">
+              <div class="search-wrap">
+                <input id="listSearch" class="input grow" placeholder="搜索接口 method / path…" autocomplete="off" />
+                <button id="listSearchClear" class="search-clear hide" type="button" title="清空">×</button>
+              </div>
+              <div class="rail-filters">
+                <button class="fchip f-toggle active" id="railApiOnly" title="只显示 XHR / Fetch 调用">仅 API</button>
+                <button class="fchip f-toggle" id="railErrors" title="只显示失败或 4xx / 5xx 的接口">仅错误</button>
+              </div>
             </div>
-            <button id="startMock" class="btn btn-primary">▶ 启动 Mock</button>
-            <button id="stopMock" class="btn" disabled>■ 停止 Mock</button>
-            <button id="mockRefreshBtn" class="btn">刷新列表</button>
+            <div class="inbox-mini hide" id="inboxMini" title="未命中请求，点此去造数据">📥 待造数据 <b id="inboxMiniN">0</b></div>
+            <div class="ep-list" id="epList">
+              <div class="empty">尚无接口。点顶栏「录制」拉起浏览器，或从 ⋯ 菜单导入 HAR，这里会按 method+path 汇总成接口台账。</div>
+            </div>
           </div>
-
-          <main class="main">
-            <div class="mock-dash">
-              <div class="mock-dash-head">
-                <span id="mockApisCount" class="muted">(0)</span>
-                <input id="mockSearch" class="input input-sm" style="width:210px" placeholder="过滤：方法/路径/备注/标签" />
-                <select id="mockSort" class="input input-sm" style="width:auto">
-                  <option value="default">默认顺序</option>
-                  <option value="method">按方法</option>
-                  <option value="path">按路径</option>
-                  <option value="status">按状态码</option>
-                  <option value="pin">已默认优先</option>
-                </select>
-              </div>
-              <div id="mockApiList" class="mock-api-list">
-                <div class="mock-api-empty">尚未启动 Mock 或无接口。</div>
-              </div>
-            </div>
-
-            <div class="mock-logs">
-              <div class="mock-dash-head">
-                <span>处理记录</span>
-                <span id="mockLogsCount" class="muted"></span>
-                <div class="spacer"></div>
-                <button id="mockLogsClearBtn" class="btn" title="清空全部处理记录">清空</button>
-                <button id="mockLogsRefreshBtn" class="btn">刷新</button>
-              </div>
-              <div id="mockLogList" class="mock-log-list">
-                <div class="mock-api-empty">暂无处理记录（Mock 收到请求后这里会实时显示，点击可查看详情）。</div>
-              </div>
-            </div>
-          </main>
+          <section class="work-view hide" id="workView"></section>
         </section>
 
-        <!-- ============ 请求库 ============ -->
-        <section class="screen" data-screen="library" id="screenLibrary">
-          <div class="lib-doc">
-            <aside class="lib-outline">
-              <div class="panel-head">目录 <span class="muted" id="libOutlineCount"></span></div>
-              <div class="ol-search-wrap"><input class="input btn-sm ol-search" id="libOutlineSearch" placeholder="过滤归属 / 端点" /></div>
-              <div class="ol-filters" id="libFilters">
-                <button class="fchip" data-m="GET">GET</button>
-                <button class="fchip" data-m="POST">POST</button>
-                <button class="fchip" data-m="PUT">PUT</button>
-                <button class="fchip" data-m="DELETE">DELETE</button>
-                <button class="fchip" data-m="PATCH">PATCH</button>
-                <span class="fsep"></span>
-                <button class="fchip f-toggle active" data-t="api">仅 API</button>
-                <button class="fchip f-toggle" data-t="err">仅错误</button>
-              </div>
-              <div class="ol-tree" id="libOutline"></div>
-            </aside>
-            <div class="lib-splitter" id="libSplitter" title="拖动调节目录宽度"></div>
-            <div class="lib-doc-body" id="libraryPad"></div>
+        <!-- Mock：Mock 处理流水（Mock 收到的请求，来一条显示一条），点进去可指定返回 / 造数据 -->
+        <section class="center-pane hide" id="paneMock">
+          <div class="mock-dash-head">
+            <div class="mock-apis-url">Mock 地址：<a id="mockPaneUrl" href="#" target="_blank" rel="noopener">—</a></div>
+            <button class="btn btn-sm" id="mockPaneRefresh">刷新</button>
+            <button class="btn btn-sm" id="mockPaneClear">清空记录</button>
+            <div class="spacer"></div>
+            <span class="muted">Mock 启动后，每收到一条请求就显示一条；点一条可「指定返回」或「造数据」</span>
+          </div>
+          <div id="mockStream" class="mock-stream">
+            <div class="mock-api-empty">暂无处理记录。点顶栏「Mock」启动后，每收到一条请求，这里就显示一条。</div>
           </div>
         </section>
 
-        <!-- ============ 导出（独立大功能）============ -->
-        <section class="screen" data-screen="export" id="screenExport">
+        <!-- 导出：格式 / 范围 / 脱敏 + 预览导出 -->
+        <section class="center-pane hide" id="paneExport">
           <div class="screen-pad" id="exportPad"></div>
         </section>
+      </main>
+    </div>
 
-        <!-- ============ 设置 ============ -->
-        <section class="screen" data-screen="settings" id="screenSettings">
-          <div class="screen-pad" id="settingsPad">
-            <div class="setting-row">
-              <span class="setting-label">设置</span>
-              <span class="setting-dock"></span>
-            </div>
+    <!-- ============ 抽屉：Mock 引擎 · 处理记录 ============ -->
+    <div class="drawer-mask hide" id="logsDrawer">
+      <div class="drawer">
+        <div class="drawer-head">
+          <span class="drawer-title">Mock 引擎 · 处理记录</span>
+          <span class="drawer-sub" id="mockLogsCount"></span>
+          <div class="spacer"></div>
+          <button id="mockLogsClearBtn" class="btn btn-sm" title="清空全部处理记录">清空</button>
+          <button id="mockLogsRefreshBtn" class="btn btn-sm">刷新</button>
+          <button class="drawer-close" data-close="logsDrawer" title="关闭">×</button>
+        </div>
+        <div class="drawer-body">
+          <div id="mockLogList" class="mock-log-list">
+            <div class="mock-api-empty">暂无处理记录（Mock 收到请求后这里会实时显示，点击可查看详情）。</div>
           </div>
-        </section>
+        </div>
       </div>
+    </div>
 
-      <!-- ============ 底部状态栏 ============ -->
-      <footer class="statusbar">
-        <span class="sb-group">
-          <span class="sb-status status-idle" id="sbApiStatus">空闲</span>
-          <span id="sbApiStats" class="sb-stats"></span>
-        </span>
-        <span class="sb-sep"></span>
-        <span class="sb-group">
-          <span class="sb-status status-idle" id="sbMockStatus">Mock 未启动</span>
-          <span id="sbMockStats" class="sb-stats"></span>
-        </span>
-        <span class="sb-spacer"></span>
-        <span class="sb-item sb-muted" id="sbInfo">就绪</span>
-      </footer>
+    <!-- ============ 抽屉：待造数据收件箱 ============ -->
+    <div class="drawer-mask hide" id="inboxDrawer">
+      <div class="drawer">
+        <div class="drawer-head">
+          <span class="drawer-title">待造数据（未命中请求）</span>
+          <div class="spacer"></div>
+          <button class="drawer-close" data-close="inboxDrawer" title="关闭">×</button>
+        </div>
+        <div class="drawer-body">
+          <div id="inboxList" class="inbox-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 抽屉：造数据 ============ -->
+    <div class="drawer-mask hide" id="makeDrawer">
+      <div class="drawer drawer-wide">
+        <div class="drawer-head">
+          <span class="drawer-title" id="makeTitle">造数据 · 新建 Mock</span>
+          <div class="spacer"></div>
+          <button class="drawer-close" data-close="makeDrawer" title="关闭">×</button>
+        </div>
+        <div class="drawer-body">
+          <div id="makeForm"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 抽屉：导出 ============ -->
+    <div class="drawer-mask hide" id="exportDrawer">
+      <div class="drawer drawer-wide">
+        <div class="drawer-head">
+          <span class="drawer-title">导出</span>
+          <div class="spacer"></div>
+          <button class="drawer-close" data-close="exportDrawer" title="关闭">×</button>
+        </div>
+        <div class="drawer-body">
+          <div class="screen-pad" id="exportPad"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 抽屉：设置 ============ -->
+    <div class="drawer-mask hide" id="settingsDrawer">
+      <div class="drawer">
+        <div class="drawer-head">
+          <span class="drawer-title">设置</span>
+          <div class="spacer"></div>
+          <button class="drawer-close" data-close="settingsDrawer" title="关闭">×</button>
+        </div>
+        <div class="drawer-body">
+          <div class="screen-pad" id="settingsPad"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 隐藏的旧状态栏节点：app.js 加载时按 ID 抓取，保留以兼容既有渲染逻辑；v3 顶栏药丸自行同步 -->
+    <div class="legacy-status hide" aria-hidden="true">
+      <span id="sbApiStatus">空闲</span><span id="sbApiStats"></span>
+      <span id="sbMockStatus">Mock 未启动</span><span id="sbMockStats"></span>
+      <span id="navRecBadge">0</span><span id="navMockBadge">0</span>
+      <span id="navRecDot"></span><span id="navRecText">空闲</span>
+      <span id="statusDot"></span><span id="statusText">空闲</span>
     </div>
   </div>
 
@@ -359,6 +399,11 @@
           <div class="json-edit-preview"></div>
           <textarea id="editResBody" class="edit-res-body hide" placeholder="响应体原文（可为 JSON / HTML / 任意文本）"></textarea>
         </div>
+        <div class="modal-subtitle">或挂文件作为下载内容（Mock 返回即触发下载，优先级高于上面的文本响应体）</div>
+        <div class="mock-attach-row">
+          <button type="button" id="editResAttach" class="btn btn-sm">📎 挂文件</button>
+          <span id="editResFileInfo" class="mock-attach-info">未挂文件</span>
+        </div>
         <div id="editResErr" class="modal-error"></div>
         <div class="modal-actions">
           <button id="editResSave" class="btn btn-primary">保存修改</button>
@@ -372,5 +417,6 @@
   <div id="exportToast" class="export-toast hide"></div>
 
   <script src="/static/app.js"></script>
+  <script src="/static/v3.js"></script>
 </body>
 </html>

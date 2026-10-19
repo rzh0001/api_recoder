@@ -6,7 +6,8 @@ const { JSDOM } = require("jsdom");
 const ROOT = "E:/api_recoder";
 const html = fs.readFileSync(path.join(ROOT, "static/index.html"), "utf8");
 const js = fs.readFileSync(path.join(ROOT, "static/app.js"), "utf8");
-const htmlWithScript = html.replace("</body>", `<script>${js}</script></body>`);
+const v3 = fs.readFileSync(path.join(ROOT, "static/v3.js"), "utf8");
+const htmlWithScript = html.replace("</body>", `<script>${js}</script><script>${v3}</script></body>`);
 
 const dom = new JSDOM(htmlWithScript, {
   runScripts: "dangerously",
@@ -36,7 +37,7 @@ function assert(name, cond, extra) {
 }
 
 function countRows() {
-  return document.querySelectorAll("#libraryPad .lib-ep-row").length;
+  return document.querySelectorAll("#epList .ep-row").length;
 }
 
 function run() {
@@ -57,21 +58,21 @@ function run() {
 
   assert("无加载期错误", errors.length === 0, errors.slice(0, 3));
 
-  window.renderLibrary();
-  // 默认 apiOnly=true → 仅 XHR/FETCH 进库（1 条）
-  assert("默认仅 API：非 API（DOCUMENT/IMAGE）不进请求库", countRows() === 1, countRows());
-  assert("默认仅 API：库里只有 /api/a", !!document.querySelector('.lib-ep-row[data-p="/api/a"]'));
+  window.renderList();
+  // 默认 apiOnly=true → 仅 XHR/FETCH 进左栏台账（1 条）
+  assert("默认仅 API：非 API（DOCUMENT/IMAGE）不进台账", countRows() === 1, countRows());
+  assert("默认仅 API：台账里只有 /api/a", !!document.querySelector('#epList .ep-row[data-p="/api/a"]'));
 
   // 关闭「仅 API」→ 显示全部 3 条
-  const apiChip = document.querySelector('[data-t="api"]');
+  const apiChip = document.getElementById("railApiOnly");
   assert("存在「仅 API」筛选 chip", !!apiChip);
-  apiChip.click(); // apiOnly -> false
-  window.renderLibrary();
-  assert("关闭仅 API 后：非 API 也进入请求库（共 3 条）", countRows() === 3, countRows());
+  apiChip.click(); // _railApiOnly -> false
+  window.renderList();
+  assert("关闭仅 API 后：非 API 也进入台账（共 3 条）", countRows() === 3, countRows());
 
   // 再打开「仅 API」→ 回到 1 条
-  apiChip.click(); // apiOnly -> true
-  window.renderLibrary();
+  apiChip.click(); // _railApiOnly -> true
+  window.renderList();
   assert("再次开启仅 API：回到 1 条", countRows() === 1, countRows());
 
   console.log(`\nRESULT pass=${pass} fail=${fail}`);

@@ -6,7 +6,8 @@ const { JSDOM } = require("jsdom");
 const ROOT = "E:/api_recoder";
 const html = fs.readFileSync(path.join(ROOT, "static/index.html"), "utf8");
 const js = fs.readFileSync(path.join(ROOT, "static/app.js"), "utf8");
-const htmlWithScript = html.replace("</body>", `<script>${js}</script></body>`);
+const v3 = fs.readFileSync(path.join(ROOT, "static/v3.js"), "utf8");
+const htmlWithScript = html.replace("</body>", `<script>${js}</script><script>${v3}</script></body>`);
 
 const dom = new JSDOM(htmlWithScript, {
   runScripts: "dangerously",
@@ -70,7 +71,8 @@ function run() {
       }),
     });
   }
-  assert("snapshot 填充后树已渲染", !!document.querySelector(".nav-item"));
+  window.renderList();
+  assert("snapshot 填充后左栏台账已渲染", !!document.querySelector("#epList .ep-row"));
 
   try { window.applyLocks(); assert("applyLocks 可执行且不抛错", true); }
   catch (e) { assert("applyLocks 可执行且不抛错", false, e.message); }
@@ -97,15 +99,19 @@ function run() {
   const oldMarkCall = fetchCalls.find((c) => typeof c.url === "string" && c.url.indexOf("/api/request/mark") >= 0);
   assert("不再调用废弃的 /api/request/mark", !oldMarkCall);
 
-  window.renderLibrary();
-  const outline = document.getElementById("libOutline");
-  assert("请求库目录已渲染", !!outline && outline.children.length > 0);
-  const docsCall = fetchCalls.find((c) => typeof c.url === "string" && c.url.indexOf("/api/endpoint/docs") >= 0);
-  assert("进入请求库时批量拉取 /api/endpoint/docs", !!docsCall);
+  // v3：请求库屏并入「左栏台账 + 中栏工作台」；文档由工作台「文档」页签按需加载（单接口）
+  window.renderList();
+  const rail = document.getElementById("epList");
+  assert("左栏台账渲染出接口行", !!rail && rail.querySelectorAll(".ep-row").length > 0);
+
+  window.showEndpoint("GET", "/api/a");
+  const docTab = document.querySelector('#workView .work-tab[data-wtab="doc"]');
+  assert("工作台含文档页签", !!docTab);
+  if (docTab) docTab.dispatchEvent(new window.Event("click", { bubbles: true }));
 
   return new Promise((res) => setTimeout(() => {
-    const listHtml = (document.getElementById("libraryPad") || {}).innerHTML || "";
-    assert("列表渲染了接口文档缓存标签（cache-tag）", listHtml.indexOf("cache-tag") >= 0, listHtml.slice(0, 120));
+    const docCall = fetchCalls.find((c) => typeof c.url === "string" && c.url.indexOf("/api/endpoint/doc") >= 0);
+    assert("打开接口文档页签时按 method+path 拉取文档", !!docCall, fetchCalls.map((c) => c.url));
     console.log(`\nRESULT pass=${pass} fail=${fail}`);
     if (fail) process.exit(1);
     res();

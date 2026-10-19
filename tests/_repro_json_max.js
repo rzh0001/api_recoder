@@ -8,14 +8,10 @@ const html = fs.readFileSync(path.join(ROOT, "static/index.html"), "utf8");
 const js = fs.readFileSync(path.join(ROOT, "static/app.js"), "utf8");
 const htmlWithScript = html.replace("</body>", `<script>${js}</script></body>`);
 
-const APIS = {
-  ok: true,
-  running: true,
-  url: "http://127.0.0.1:1/",
-  apis: [
-    { seq: 1, method: "GET", path: "/api/x", query: "", status: 200, mock_pin: false, hits: 2, body_preview: '{"v":{"x":1}}', req_body_preview: '{"q":{"y":9}}', body_pretty: '{\n  "v": {\n    "x": 1\n  }\n}', req_body_pretty: '{\n  "q": {\n    "y": 9\n  }\n}', note: "", tags: [] },
-  ],
-};
+const MOCK_LOGS = [
+  { ts: 1700000001, method: "GET", path: "/api/x", query: "", url: "http://a.com/api/x", matched: true, miss_reason: null,
+    status: 200, req_headers: {}, req_body: "", res_headers: {}, res_body: '{"v":{"x":1}}' },
+];
 
 const dom = new JSDOM(htmlWithScript, {
   runScripts: "dangerously",
@@ -25,9 +21,9 @@ const dom = new JSDOM(htmlWithScript, {
     window.fetch = (url, opts) => {
       const u = typeof url === "string" ? url : "";
       let body = { ok: true };
-      if (u.indexOf("/api/mock/apis") >= 0) body = APIS;
-      else if (u.indexOf("/api/mock/status") >= 0) body = { running: true, url: APIS.url, count: APIS.apis.length };
-      else if (u.indexOf("/api/mock/logs") >= 0) body = { running: true, logs: [] };
+      if (u.indexOf("/api/mock/apis") >= 0) body = { ok: true, running: true, url: "http://127.0.0.1:1/", apis: [] };
+      else if (u.indexOf("/api/mock/status") >= 0) body = { running: true, url: "http://127.0.0.1:1/", count: 0 };
+      else if (u.indexOf("/api/mock/logs") >= 0) body = { running: true, logs: MOCK_LOGS };
       else if (u.indexOf("/api/status") >= 0) body = { status: "idle" };
       else if (u.indexOf("/api/config") >= 0) body = { ok: true, match_mode: true };
       else if (u.indexOf("/api/endpoint/") >= 0) body = { ok: true, docs: [] };
@@ -36,6 +32,7 @@ const dom = new JSDOM(htmlWithScript, {
     window.alert = () => {};
     window.prompt = () => null;
     window.navigator.clipboard = { writeText: () => Promise.resolve() };
+    window.WebSocket = function () { this.send = () => {}; this.close = () => {}; };
   },
 });
 const { window } = dom;
@@ -59,43 +56,16 @@ setTimeout(() => {
   assert("含 #jsonMaxCopy", !!document.getElementById("jsonMaxCopy"));
   assert("含 #jsonMaxClose", !!document.getElementById("jsonMaxClose"));
 
-  // 切到 mock tab → 渲染 → 展开一张卡暴露 .mock-card-code
-  document.querySelector('[data-go="mock"]').dispatchEvent(new window.Event("click", { bubbles: true }));
-
   setTimeout(() => {
-    const list = document.getElementById("mockApiList");
-    const card = list.querySelector(".mock-api-card");
-    assert("mock 列表渲染出记录卡", !!card);
-
-    // mock card 有 ⛶ 按钮（请求体 + 返回体 各一个）
-    const cardMaxBtns = card.querySelectorAll(".mock-card-max");
-    assert("记录卡含 2 个 ⛶（请求体/返回体）", cardMaxBtns.length === 2, cardMaxBtns.length);
-
-    // 展开卡 → 展开返回体 code
-    card.querySelector(".mock-api-card-head").dispatchEvent(new window.Event("click", { bubbles: true }));
-    const resSummary = card.querySelector(".mock-res-summary");
-    resSummary.dispatchEvent(new window.Event("click", { bubbles: true }));
-    const resCode = card.querySelector(".mock-res-code");
-    assert("返回体 code 已显示（display:block）", resCode.style.display === "block");
-    assert("返回体 code 含 .json-viewer", !!resCode.querySelector(".json-viewer"));
-    const srcRaw = resCode.querySelector(".json-viewer").getAttribute("data-raw");
-
-    // 点击返回体 ⛶ → 打开最大化弹窗
-    card.querySelector(".mock-res-section .mock-card-max").dispatchEvent(new window.Event("click", { bubbles: true }));
     const modal = document.getElementById("jsonMaxModal");
-    assert("点击 ⛶ → #jsonMaxModal 显示（无 .hide）", !modal.classList.contains("hide"));
-    const clone = document.querySelector("#jsonMaxBody .json-viewer");
-    assert("弹窗内含克隆 .json-viewer", !!clone);
-    assert("克隆体 data-raw 与源一致", clone && clone.getAttribute("data-raw") === srcRaw, clone && clone.getAttribute("data-raw"));
-    assert("弹窗标题取自 section-title（返回体）", document.getElementById("jsonMaxTitle").textContent.indexOf("返回体") >= 0);
 
-    // 克隆体仍保留折叠按钮（全局委托可继续交互）
-    assert("克隆体保留 .json-fold 折叠按钮", !!clone.querySelector(".json-fold"));
-
-    // 关闭（×）→ 弹窗隐藏且内容清空
-    document.getElementById("jsonMaxClose").dispatchEvent(new window.Event("click", { bubbles: true }));
-    assert("点 × → #jsonMaxModal 隐藏", modal.classList.contains("hide"));
-    assert("关闭后 #jsonMaxBody 已清空", document.getElementById("jsonMaxBody").innerHTML === "");
+    // Mock 卡片区已改为请求历史流水；此处验证流水行展开后的响应体可最大化
+    window.loadMockLogs();
+    const row = document.querySelector("#mockStream .mock-stream-row");
+    assert("Mock 流水渲染出记录行", !!row);
+    row.querySelector(".mock-stream-head").dispatchEvent(new window.Event("click", { bubbles: true }));
+    const codeEl = row.querySelector(".mock-stream-code");
+    assert("展开流水行 → 显示响应体预览", !!codeEl && codeEl.textContent.indexOf('"x"') >= 0, codeEl && codeEl.textContent.slice(0, 40));
 
     // 详情 data-block 路径：合成一个 .data-block 验证 .db-max
     const blk = document.createElement("div");

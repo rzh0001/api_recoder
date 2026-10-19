@@ -43,6 +43,7 @@ let ws = null;
 let renderTimer = null;
 let activeSeq = null;
 let currentDetail = null;
+let editingResSeq = null;
 let recordingActive = false;  // 是否正在录制
 let mockRunning = false;      // Mock 是否运行中
 let sortBy = "default";       // 列表排序方式：default=按时间 / url=按 API 地址
@@ -217,27 +218,7 @@ function handleMsg(msg) {
     if (msg.status) updateMockUI(msg.status);
   } else if (msg.type === "mock_log") {
     loadMockLogs();
-    scheduleHitsRefresh();
   }
-}
-
-// Mock 命中计数：mock_log 推送后节流重拉 apis（服务端累计），只更新徽标数字不重建列表
-let _hitsTimer = null;
-function scheduleHitsRefresh() {
-  if (_hitsTimer) return;
-  _hitsTimer = setTimeout(() => {
-    _hitsTimer = null;
-    postJSON("/api/mock/apis", {}).then((res) => {
-      if (!res || !res.data) return;
-      const apis = res.data.apis || [];
-      apis.forEach((a) => {
-        const card = mockApiList.querySelector(`.mock-api-card[data-seq="${a.seq}"]`);
-        if (!card) return;
-        const b = card.querySelector(".mock-hit-badge");
-        if (b) b.textContent = "命中 " + (Number(a.hits) || 0);
-      });
-    }).catch(() => {});
-  }, 300);
 }
 
 // ---------------- 状态/统计 ----------------
@@ -334,49 +315,130 @@ function updateStrictModeUI() {
   }
 }
 
-// ---------------- Mock 接口列表（内联在 Mock tab）+ 快速测试 ----------------
-const mockApiList = $("mockApiList");
+// ---------------- Mock 页签（Mock 处理流水）+ 指定返回 / 快速测试 ----------------
 const mockApisUrl = $("mockApisUrl");
-const mockApisCount = $("mockApisCount");
-const mockSearch = $("mockSearch");
-const mockSort = $("mockSort");
 
 function loadMockApis() {
-  mockApiList.innerHTML = `<div class="mock-api-empty">加载中…</div>`;
   return postJSON("/api/mock/apis", {}).then((res) => {
     if (!res || !res.data) return;
     const d = res.data;
-    mockApisUrl.textContent = d.url || "—";
-    mockApisUrl.href = d.url || "#";
-    const apis = d.apis || [];
-    window.__mockApis = apis;
+    const urlEl = mockApisUrl || document.getElementById("mockApisUrl");
+    if (urlEl) { urlEl.textContent = d.url || "—"; urlEl.href = d.url || "#"; }
+    const paneUrl = document.getElementById("mockPaneUrl");
+    if (paneUrl) { paneUrl.textContent = d.url || "—"; paneUrl.href = d.url || "#"; }
+    window.__mockApis = d.apis || [];
     window.__mockApisBySeq = {};
-    apis.forEach((a) => { window.__mockApisBySeq[a.seq] = a; });
-    applyMockFilterSort();
+    window.__mockApis.forEach((a) => { window.__mockApisBySeq[a.seq] = a; });
   });
 }
 
-// 过滤（按方法/路径/备注/标签多词匹配）+ 排序，再渲染
-function applyMockFilterSort() {
-  const apis = window.__mockApis || [];
-  mockApisCount.textContent = `(${apis.length})`;
-  const q = ((mockSearch && mockSearch.value) || "").trim().toLowerCase();
-  const tokens = q ? q.split(/[\s|]+/).map((t) => t.trim()).filter(Boolean) : [];
-  let list = apis;
-  if (tokens.length) {
-    list = apis.filter((a) => {
-      const hay = [a.method, a.path, a.query, a.note, (a.tags || []).join(" "), a.status, a.body_preview, a.req_body_preview].join(" ").toLowerCase();
-      return tokens.every((t) => hay.indexOf(t) !== -1);
-    });
+// Mock 页签：Mock 处理流水（Mock 引擎收到的请求，来一条显示一条）。
+// 数据源 = /api/mock/logs（mockLogs，最新在前）；Mock 没跑过就是空的。
+// 点行展开：可「指定返回」（把这条请求对应的录制响应固定为 Mock 默认）、「造数据」（改响应）。
+function renderMockStream() {
+  const box = document.getElementById("mockStream");
+  if (!box) return;
+  // 保留展开态：新请求实时插入时不能把用户已展开的行折叠回去
+  const openSet = new Set(
+    Array.from(box.querySelectorAll(".mock-stream-row.expanded")).map((r) => r.getAttribute("data-key"))
+  );
+  const list = mockLogs;
+  if (!list.length) {
+    const running = !!(window.__mockRunning);
+    box.innerHTML = `<div class="mock-api-empty">${
+      running
+        ? "Mock 已启动，等待请求进来 —— 每收到一条请求，这里就显示一条。"
+        : "暂无处理记录。点顶栏「Mock」启动后，每收到一条请求，这里就显示一条。"
+    }</div>`;
+    return;
   }
-  const sort = (mockSort && mockSort.value) || "default";
-  list = list.slice();
-  if (sort === "method") list.sort((a, b) => String(a.method).localeCompare(String(b.method)));
-  else if (sort === "path") list.sort((a, b) => String(a.path).localeCompare(String(b.path)));
-  else if (sort === "status") list.sort((a, b) => (Number(a.status) || 0) - (Number(b.status) || 0));
-  else if (sort === "pin") list.sort((a, b) => (b.mock_pin ? 1 : 0) - (a.mock_pin ? 1 : 0));
-  renderMockApis(list);
-  return list;
+  box.innerHTML = list.map((l, i) => {
+    const m = String(l.method || "GET").toUpperCase();
+    const st = l.status;
+    const okCls = (l.status >= 400) ? "s-err" : "s-ok";
+    const key = `${m} ${l.path || "/"} ${l.query || ""} ${l.ts || i}`;
+    const missBadge = l.matched ? "" : `<span class="mock-stream-pin" style="background:#fdecea;color:#A32D2D" title="${esc(l.miss_reason || "未命中")}">未命中</span>`;
+    const time = l.ts ? fmtTime(l.ts) : "";
+    return `<div class="mock-stream-row${openSet.has(key) ? " expanded" : ""}" data-i="${i}" data-key="${esc(key)}">
+      <div class="mock-stream-head">
+        <span class="mock-stream-caret">▶</span>
+        <span class="method-badge m-${m.toLowerCase()}">${esc(m)}</span>
+        <span class="mock-stream-path" title="${esc(l.url || l.path || "")}">${esc((l.path || "/") + (l.query ? "?" + l.query : ""))}</span>
+        ${missBadge}
+        <span class="mock-stream-time">${time}</span>
+        <span class="mock-stream-status ${okCls}">${esc(String(st))}</span>
+      </div>
+      <div class="mock-stream-body">
+        <div class="mock-stream-ops">
+          <button class="btn btn-sm btn-primary ms-pin" data-i="${i}" title="指定返回：把这条请求对应的录制响应固定为 Mock 默认（同 method+path 唯一）">指定返回</button>
+          <button class="btn btn-sm ms-make" data-i="${i}" title="基于这条请求造一份 Mock 返回（可改状态码 / 响应体 / 挂文件）">造数据</button>
+          <button class="btn btn-sm ms-test" data-i="${i}" title="按这条请求实测一次，看 Mock 当前会返回什么">测试</button>
+        </div>
+        ${l.miss_reason ? `<div class="mock-stream-code" style="color:#A32D2D">未命中原因：${esc(l.miss_reason)}</div>` : ""}
+        <div class="mock-stream-code">${esc(_msLogBody(l))}</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  box.querySelectorAll(".mock-stream-head").forEach((head) => {
+    head.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      head.closest(".mock-stream-row").classList.toggle("expanded");
+    });
+  });
+  box.querySelectorAll(".ms-pin").forEach((btn) => btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const l = list[Number(btn.getAttribute("data-i"))];
+    if (!l) return;
+    specifyMockFromLog(l, btn);
+  }));
+  box.querySelectorAll(".ms-make").forEach((btn) => btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const l = list[Number(btn.getAttribute("data-i"))];
+    if (!l) return;
+    openMake({ method: l.method, path: l.path, query: l.query, req_body: l.req_body || "" });
+  }));
+  box.querySelectorAll(".ms-test").forEach((btn) => btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const l = list[Number(btn.getAttribute("data-i"))];
+    if (!l) return;
+    testMockByReq({ method: l.method, path: l.path, query: l.query }, btn);
+  }));
+}
+
+function _msLogBody(l) {
+  const b = l.res_body;
+  if (b == null || b === "") return "（无响应体）";
+  const s = typeof b === "string" ? b : JSON.stringify(b, null, 2);
+  return s.length > 2000 ? s.slice(0, 2000) + "\n…（已截断）" : s;
+}
+
+// 把「Mock 收到的那条请求」对应的录制记录固定为默认返回。
+// 找不到对应录制记录时，退回用这条请求本身造一条 Mock 并默认。
+function specifyMockFromLog(log, btn) {
+  const m = String(log.method || "GET").toUpperCase();
+  const rec = (window.allRequests || []).find(
+    (r) => String(r.method || "").toUpperCase() === m && (r.path || "") === (log.path || "") && (r.query || "") === (log.query || "")
+  ) || (window.allRequests || []).find(
+    (r) => String(r.method || "").toUpperCase() === m && (r.path || "") === (log.path || "")
+  );
+  if (!rec) {
+    openMake({ method: m, path: log.path, query: log.query, req_body: log.req_body || "" });
+    return;
+  }
+  pinMockApi({ seq: rec.seq }, btn);
+}
+
+function testMockByReq(req, btn) {
+  if (btn) btn.disabled = true;
+  postJSON("/api/mock/test", { method: req.method, path: req.path, query: req.query })
+    .then((res) => {
+      if (!btn) return;
+      const d = (res && res.data) || {};
+      btn.textContent = d.ok ? `状态 ${d.status} · ${d.ms}ms` : "测试失败";
+      btn.disabled = false;
+    })
+    .catch(() => { if (btn) { btn.textContent = "测试失败"; btn.disabled = false; } });
 }
 
 // 在「已由 JSON.stringify(obj, null, 2) 标准格式化」的文本行上，
@@ -686,170 +748,6 @@ function refreshJsonEdit(textareaEl) {
   if (c && c.__jeSetMode) c.__jeSetMode("preview");
 }
 
-function renderMockApis(list) {
-  if (!list.length) {
-    const total = (window.__mockApis || []).length;
-    mockApiList.innerHTML = `<div class="mock-api-empty">${total ? "无匹配接口（试试调整过滤词）。" : "尚无接口（仅 XHR/FETCH 类型会被模拟）。"}</div>`;
-    return;
-  }
-  // 三级折叠：接口（method+path） → 请求参数（query） → 记录。
-  // 全部默认折叠，点各层头部展开；记录详情默认折叠，限高避免撑爆。
-  const groups = [];
-  const gmap = new Map();
-  list.forEach((a) => {
-    const gk = (a.method || "GET").toUpperCase() + " " + a.path;
-    let g = gmap.get(gk);
-    if (!g) {
-      g = { key: gk, method: a.method || "GET", path: a.path || "", queries: [], qmap: new Map() };
-      gmap.set(gk, g);
-      groups.push(g);
-    }
-    const qk = a.query || "";
-    let q = g.qmap.get(qk);
-    if (!q) {
-      q = { key: qk, query: qk, items: [] };
-      g.qmap.set(qk, q);
-      g.queries.push(q);
-    }
-    q.items.push(a);
-  });
-  mockApiList.innerHTML = groups.map((g) => {
-    const totalCount = g.queries.reduce((s, q) => s + q.items.length, 0);
-    const pinTotal = g.queries.reduce((s, q) => s + q.items.filter((x) => x.mock_pin).length, 0);
-    const pinTip = pinTotal === 1
-      ? "整接口已固定：任何请求（任意 query / 请求体）都返回这条默认"
-      : "多条默认（不同 query）并存：各自 query 精确命中，互不干扰";
-    return `<div class="mock-group" data-group="${esc(g.key)}">
-      <div class="mock-group-head" title="点击展开/折叠接口">
-        <span class="method-badge m-${esc(String(g.method || "GET").toUpperCase())}">${esc(g.method || "GET")}</span>
-        <span class="mock-group-path" title="${esc(g.path)}">${esc(g.path)}</span>
-        <span class="mock-group-count">${totalCount} 条 / ${g.queries.length} 个 query</span>
-        ${pinTotal ? `<span class="pin-badge" title="${pinTip}">已默认 ${pinTotal} 条</span>` : ""}
-        <span class="expand-icon">▶</span>
-      </div>
-      <div class="mock-group-body">
-        ${g.queries.map((q) => {
-          const pinnedItem = q.items.find((x) => x.mock_pin);
-          const pinTip = pinnedItem
-            ? `<span class="mock-query-pin-tip" title="该 query 一律返回本条（无视请求体差异）">默认 ${pinnedItem.status} · ${esc((pinnedItem.body_preview || "").slice(0, 60))}</span>`
-            : `<span class="mock-query-pin-tip muted">未默认</span>`;
-          return `<div class="mock-query-item" data-qkey="${esc(q.key)}">
-            <div class="mock-query-head" title="点击展开/折叠相同 query 的记录">
-              <span class="mock-query-key">query: ${q.key ? `<code>${esc(q.key)}</code>` : `<span class="muted">&lt;无 query&gt;</span>`}</span>
-              <span class="mock-query-count">${q.items.length} 条</span>
-              ${pinTip}
-              <span class="expand-icon">▶</span>
-            </div>
-            <div class="mock-query-body">
-              ${q.items.map((a) =>
-                `<div class="mock-api-card${a.mock_pin ? " pinned" : ""}" data-seq="${a.seq}">
-                  <div class="mock-api-card-head">
-                    <div class="mock-api-card-meta">
-                      <span class="method-badge m-${esc(String(a.method || "GET").toUpperCase())}">${esc(a.method || "GET")}</span>
-                      <span class="resp-badge">${esc(String(a.status))}</span>
-                      <span class="mock-hit-badge">命中 ${Number(a.hits) || 0}</span>
-                      <span class="resp-preview" title="${esc(a.body_preview || "")}">${esc(a.body_preview || "")}</span>
-                    </div>
-                    <div class="mock-api-card-ops">
-                      ${rowMarkHtml(a)}
-                      <button class="btn btn-sm mock-pin-one" data-seq="${a.seq}" title="${a.mock_pin ? "取消：该 query 不再固定返回本条" : "固定：该 query 一律返回本条（无视请求体差异）"}">${a.mock_pin ? "取消默认" : "默认"}</button>
-                      <button class="btn btn-sm mock-test-one">测试</button>
-                      <button class="btn btn-sm mock-src-one" data-jump-seq="${a.seq}" title="跳到录制页查看这条原始记录">来源</button>
-                      <span class="mock-expand-toggle" title="展开/折叠详情">▼</span>
-                    </div>
-                  </div>
-                  <div class="mock-api-card-body" style="display:none">
-                    <div class="mock-api-bodies">
-                      <div class="mock-card-section mock-req-section">
-                        <div class="mock-card-section-title">请求体 <button class="btn-mini mock-card-max" data-max title="最大化查看">⛶</button></div>
-                        <div class="mock-card-summary mock-req-summary" title="点击展开/折叠">${a.req_body_preview ? esc(a.req_body_preview) : '<span class="muted">（无请求体）</span>'}</div>
-                        <div class="mock-card-code mock-req-code" style="display:none">${renderJsonGutter(a.req_body_pretty, { copyRaw: a.req_body_pretty })}</div>
-                      </div>
-                      <div class="mock-card-section mock-res-section">
-                        <div class="mock-card-section-title">返回体 <button class="btn-mini mock-card-max" data-max title="最大化查看">⛶</button></div>
-                        <div class="mock-card-summary mock-res-summary" title="点击展开/折叠">${a.body_preview ? esc(a.body_preview) : '<span class="muted">（无响应体）</span>'}</div>
-                        <div class="mock-card-code mock-res-code" style="display:none">${renderJsonGutter(a.body_pretty, { copyRaw: a.body_pretty })}</div>
-                      </div>
-                    </div>
-                    <pre class="mock-api-result" style="display:none"></pre>
-                  </div>
-                </div>`
-              ).join("")}
-            </div>
-          </div>`;
-        }).join("")}
-      </div>
-    </div>`;
-  }).join("");
-
-  // 组头展开/折叠
-  mockApiList.querySelectorAll(".mock-group-head").forEach((head) => {
-    head.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
-      head.closest(".mock-group").classList.toggle("expanded");
-    });
-  });
-  // query 头展开/折叠
-  mockApiList.querySelectorAll(".mock-query-head").forEach((head) => {
-    head.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
-      head.closest(".mock-query-item").classList.toggle("expanded");
-    });
-  });
-  // 单条记录头展开/折叠详情
-  mockApiList.querySelectorAll(".mock-api-card-head").forEach((head) => {
-    head.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
-      const card = head.closest(".mock-api-card");
-      const body = card.querySelector(".mock-api-card-body");
-      const toggle = head.querySelector(".mock-expand-toggle");
-      const hidden = noneOrNone(body.style.display);
-      body.style.display = hidden ? "block" : "none";
-      toggle.textContent = hidden ? "▲" : "▼";
-      card.classList.toggle("expanded", hidden);
-    });
-  });
-  mockApiList.querySelectorAll(".mock-test-one").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const card = btn.closest(".mock-api-card");
-      testMockApi(window.__mockApisBySeq[card.getAttribute("data-seq")], card);
-    });
-  });
-  mockApiList.querySelectorAll(".mock-pin-one").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      pinMockApi(window.__mockApisBySeq[btn.getAttribute("data-seq")], btn);
-    });
-  });
-  mockApiList.querySelectorAll(".mock-src-one").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const seq = Number(btn.getAttribute("data-jump-seq"));
-      if (seq) go("recording", { focusSeq: seq });
-    });
-  });
-  mockApiList.querySelectorAll(".mock-req-summary").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const code = el.parentElement.querySelector(".mock-req-code");
-      if (!code) return;
-      const hidden = noneOrNone(code.style.display);
-      code.style.display = hidden ? "block" : "none";
-      el.classList.toggle("expanded", hidden);
-    });
-  });
-  mockApiList.querySelectorAll(".mock-res-summary").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const code = el.parentElement.querySelector(".mock-res-code");
-      if (!code) return;
-      const hidden = noneOrNone(code.style.display);
-      code.style.display = hidden ? "block" : "none";
-      el.classList.toggle("expanded", hidden);
-    });
-  });
-}
 
 function noneOrNone(v) { return v === "none" || v === ""; }
 
@@ -896,8 +794,6 @@ async function testMockApi(api, card) {
 }
 
 mockRefreshBtn.addEventListener("click", loadMockApis);
-if (mockSearch) mockSearch.addEventListener("input", applyMockFilterSort);
-if (mockSort) mockSort.addEventListener("change", applyMockFilterSort);
 
 // ---------------- Mock 处理记录（收到的请求 + 返回数据）----------------
 let mockLogs = [];
@@ -917,7 +813,12 @@ function fmtTime(ts) {
 function loadMockLogs() {
   return postJSON("/api/mock/logs", {})
     .then((res) => {
-      if (res.data) { mockLogs = res.data.logs || []; renderMockLogs(); }
+      if (res.data) {
+        mockLogs = res.data.logs || [];
+        window.__mockRunning = !!res.data.running;
+        renderMockLogs();
+        if (typeof renderMockStream === "function") renderMockStream();
+      }
     })
     .catch(() => {});
 }
@@ -1022,7 +923,12 @@ document.addEventListener("DOMContentLoaded", () => {
 // ---------------- 渲染树 ----------------
 function scheduleRender() {
   if (renderTimer) return;
-  renderTimer = setTimeout(() => { renderTimer = null; render(); }, 200);
+  renderTimer = setTimeout(() => {
+    renderTimer = null;
+    render();
+    if (typeof renderList === "function") renderList();
+    if (typeof renderHead === "function") renderHead();
+  }, 200);
 }
 
 function reqRowHtml(r) {
@@ -1191,7 +1097,7 @@ function openDetail(seq) {
   // 先从本地找（含截断 body），同时拉完整记录
   const local = allRequests.find((r) => r.seq === seq);
   if (local) renderDetail(local);
-  fetch(`/api/request/${seq}`)
+  fetch(`/api/request/${seq}`, { cache: "no-store" })
     .then((r) => (r.ok ? r.json() : null))
     .then((rec) => { if (rec) { currentDetail = rec; renderDetail(rec); } })
     .catch(() => {});
@@ -1202,7 +1108,7 @@ function renderDetail(rec) {
   currentDetail = rec;
   const sc = statusClass(rec);
   const statusTxt = rec.is_failed ? "失败" : (rec.response && rec.response.status != null ? rec.response.status : "—");
-  const hasBody = rec.response && rec.response.body != null;
+  const hasBody = rec.response && (rec.response.body != null || (rec.response.is_binary && rec.response.body_b64));
   const head =
     `<div class="detail-head">` +
     `<div class="detail-title">${esc(rec.method)} ${hl(rec.url)} <button class="btn-mini" data-copy-url title="复制完整请求地址">📋 复制</button>` +
@@ -1210,6 +1116,7 @@ function renderDetail(rec) {
     `<button class="btn-mini" id="editResBtn" title="编辑响应（状态码 / 响应头 / 响应体），用于造数据">✏ 编辑响应</button>` +
     `<button class="btn-mini" id="gotoLibBtn" title="在请求库中查看该接口的完整文档">📚 请求库</button>` +
     `<button class="btn-mini" id="pinMockBtn" title="把这条响应固定为 Mock 默认返回">📌 固定到 Mock</button>` +
+    `<button class="btn-mini" id="makeDataBtn" title="为这个请求造一条 Mock 数据（新建或覆盖默认返回）">🔧 造数据</button>` +
     (hasBody ? `<button class="btn-mini" id="downloadFileBtn" title="将响应体另存为文件">⬇ 下载文件</button>` : "") +
     `<button class="btn-mini" id="delDetailBtn" title="删除该条录制记录">🗑 删除</button>` +
     `</div>` +
@@ -1254,6 +1161,11 @@ function renderDetail(rec) {
   const pinMockBtn = $("pinMockBtn");
   if (pinMockBtn) pinMockBtn.addEventListener("click", () => pinSeqToMock(rec.seq, pinMockBtn));
 
+  const makeDataBtn = $("makeDataBtn");
+  if (makeDataBtn) makeDataBtn.addEventListener("click", () => {
+    if (typeof openMake === "function") openMake({ method: rec.method, path: rec.path || rec.url, query: rec.query, req_body: (rec.request && rec.request.post_data) || "" });
+  });
+
   const markSaveBtn = $("markSaveBtn");
   if (markSaveBtn) {
     markSaveBtn.addEventListener("click", () => {
@@ -1294,30 +1206,58 @@ function renderDetail(rec) {
       const oldText = dlBtn.textContent;
       dlBtn.textContent = "下载中…";
 
-      // 直接用前端已有的完整响应体（currentDetail.response.body），无需再 fetch 后端
-      const body = (currentDetail && currentDetail.response && currentDetail.response.body) || rec.response.body;
-      if (body == null) {
+      // 优先用前端已有的完整响应体（currentDetail.response），无需再 fetch 后端
+      const resp = (currentDetail && currentDetail.response) || rec.response || {};
+      const body = resp.body;
+      const b64 = resp.body_b64;
+      const isBinary = resp.is_binary;
+      const mf = (currentDetail && currentDetail.mock_file) || rec.mock_file;
+      if (body == null && !b64 && !(mf && mf.b64)) {
         alert("该请求无响应体，无法下载。");
         dlBtn.disabled = false; dlBtn.textContent = oldText;
         return;
       }
 
-      // 从 URL 推断文件名
-      const url = rec.url || "";
-      let seg = url.split("/").pop().split("?")[0] || "";
-      const rt = (rec.resource_type || "").toUpperCase();
-      const extMap = { SCRIPT:".js", STYLESHEET:".css", XHR:".json", FETCH:".json", IMAGE:".bin", FONT:".woff2", DOCUMENT:".html" };
-      if (!seg || !seg.includes(".")) {
-        seg = (rec.path || "download").split("/").pop() || "download";
-        seg += extMap[rt] || ".txt";
-      }
-      const filename = seg;
+      // 文件名：挂文件优先用其文件名；否则取响应头 Content-Disposition；再退 URL/路径
+      const filename = (mf && mf.filename) ? mf.filename : inferDownloadName(rec, resp);
 
-      downloadFileSave(filename, body)
-        .catch((e) => alert("下载失败：" + e.message))
-        .finally(() => { dlBtn.disabled = false; dlBtn.textContent = oldText; });
+      if (mf && mf.b64) {
+        downloadBinarySave(filename, mf.b64)
+          .catch((e) => alert("下载失败：" + e.message))
+          .finally(() => { dlBtn.disabled = false; dlBtn.textContent = oldText; });
+      } else if (isBinary && b64) {
+        downloadBinarySave(filename, b64)
+          .catch((e) => alert("下载失败：" + e.message))
+          .finally(() => { dlBtn.disabled = false; dlBtn.textContent = oldText; });
+      } else {
+        downloadFileSave(filename, body)
+          .catch((e) => alert("下载失败：" + e.message))
+          .finally(() => { dlBtn.disabled = false; dlBtn.textContent = oldText; });
+      }
     });
   }
+}
+
+function inferDownloadName(rec, resp) {
+  // 1) 响应头 Content-Disposition: attachment; filename="x.pdf"
+  const hdrs = (resp && resp.headers) || {};
+  const cd = hdrs["Content-Disposition"] || hdrs["content-disposition"];
+  if (cd) {
+    let m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="([^"]+)"/i) || cd.match(/filename=([^;]+)/i);
+    if (m) {
+      try { return decodeURIComponent(m[1].trim()); } catch (e) { return m[1].trim(); }
+    }
+  }
+  // 2) URL / 路径末段
+  const url = rec.url || "";
+  let seg = url.split("/").pop().split("?")[0] || "";
+  const rt = (rec.resource_type || "").toUpperCase();
+  const extMap = { SCRIPT:".js", STYLESHEET:".css", XHR:".json", FETCH:".json", IMAGE:".bin", FONT:".woff2", DOCUMENT:".html" };
+  if (!seg || !seg.includes(".")) {
+    seg = (rec.path || "download").split("/").pop() || "download";
+    seg += extMap[rt] || ".bin";
+  }
+  return seg;
 }
 
 function tabBtn(key, label, activeKey) {
@@ -1573,6 +1513,7 @@ function wireEditReqModal() {
 function openEditRes(rec) {
   const modal = $("editResModal");
   if (!modal) return;
+  editingResSeq = rec && rec.seq != null ? rec.seq : null;
   const r = rec.response || {};
   $("editResStatus").value = r.status != null ? r.status : "";
   $("editResStatusText").value = r.status_text || "";
@@ -1581,10 +1522,75 @@ function openEditRes(rec) {
   const b = r.body;
   $("editResBody").value = b == null ? "" : (pretty(b) || "");
   $("editResErr").textContent = "";
+  renderEditResFileInfo(rec.mock_file);
   refreshJsonEdit($("editResHeaders"));
   refreshJsonEdit($("editResBody"));
   modal.classList.remove("hide");
   setTimeout(() => $("editResStatus") && $("editResStatus").focus(), 50);
+}
+
+function renderEditResFileInfo(mf) {
+  const el = $("editResFileInfo");
+  if (!el) return;
+  if (mf && mf.filename) {
+    el.innerHTML = `📎 ${esc(mf.filename)}（${fmtSize(mf.size || 0)}）` +
+      ` <a href="javascript:;" id="editResFileRemove" title="移除已挂文件">移除</a>`;
+  } else {
+    el.textContent = "未挂文件";
+  }
+}
+
+function wireEditResAttach() {
+  const btn = $("editResAttach");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const rec = currentDetail;
+    if (!rec) { alert("请先打开一条记录"); return; }
+    const input = _getMockFileInput();
+    input.value = "";
+    input.onchange = () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const b64 = (reader.result || "").split(",").pop();
+        postJSON("/api/mock/file", { seq: rec.seq, filename: f.name, mime: f.type || "application/octet-stream", b64 })
+          .then((r) => {
+            if (r.ok && r.data && r.data.ok) {
+              renderEditResFileInfo({ filename: f.name, size: f.size });
+              openDetail(rec.seq);
+            } else {
+              alert("挂文件失败：" + ((r.data && r.data.error) || "未知错误"));
+            }
+          })
+          .catch((e) => alert("挂文件失败：" + e));
+      };
+      reader.onerror = () => alert("读取文件失败");
+      reader.readAsDataURL(f);
+    };
+    input.click();
+  });
+
+  const info = $("editResFileInfo");
+  if (info) {
+    info.addEventListener("click", (e) => {
+      const rm = e.target.closest("#editResFileRemove");
+      if (!rm) return;
+      e.preventDefault();
+      const rec = currentDetail;
+      if (!rec) return;
+      postJSON("/api/mock/file/clear", { seq: rec.seq })
+        .then((r) => {
+          if (r.ok && r.data && r.data.ok) {
+            renderEditResFileInfo(null);
+            openDetail(rec.seq);
+          } else {
+            alert("移除失败：" + ((r.data && r.data.error) || "未知错误"));
+          }
+        })
+        .catch((e) => alert("移除失败：" + e));
+    });
+  }
 }
 
 function wireEditResModal() {
@@ -1594,9 +1600,13 @@ function wireEditResModal() {
   $("editResCancel").addEventListener("click", () => modal.classList.add("hide"));
   modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.add("hide"); });
   $("editResSave").addEventListener("click", () => {
-    if (!currentDetail) return;
     const errEl = $("editResErr");
     errEl.textContent = "";
+    const seq = editingResSeq;
+    if (seq == null) {
+      errEl.textContent = "请重新打开该请求的编辑响应后再试";
+      return;
+    }
     const statusRaw = $("editResStatus").value.trim();
     let res_status = null;
     if (statusRaw !== "") {
@@ -1608,8 +1618,9 @@ function wireEditResModal() {
     }
     const saveBtn = $("editResSave");
     saveBtn.disabled = true;
+    saveBtn.textContent = "保存中…";
     postJSON("/api/response/edit", {
-      seq: currentDetail.seq,
+      seq,
       res_status,
       res_status_text: $("editResStatusText").value,
       res_headers: $("editResHeaders").value,
@@ -1618,13 +1629,13 @@ function wireEditResModal() {
       .then((res) => {
         if (res.ok && res.data && res.data.ok) {
           modal.classList.add("hide");
-          openDetail(currentDetail.seq);  // 重新拉取，刷新概览/响应体/树
+          openDetail(seq);
         } else {
-          errEl.textContent = "保存失败：" + ((res.data && res.data.error) || "未知错误");
+          errEl.textContent = "保存失败：" + ((res.data && res.data.error) || ("HTTP " + res.status));
         }
       })
-      .catch((e) => { errEl.textContent = "保存失败：" + e; })
-      .finally(() => { saveBtn.disabled = false; });
+      .catch((e) => { errEl.textContent = "保存失败：" + (e && e.message ? e.message : e); })
+      .finally(() => { saveBtn.disabled = false; saveBtn.textContent = "保存修改"; });
   });
 }
 
@@ -2253,6 +2264,69 @@ function downloadFileSave(filename, content) {
   }).catch((e) => alert("下载失败：" + e));
 }
 
+// 二进制响应体（base64）落盘到 EXPORT_DIR，保留原始文件
+function downloadBinarySave(filename, b64) {
+  return postJSON("/api/file/save", { filename, b64 }).then((r) => {
+    if (r.ok && r.data && r.data.ok) {
+      showExportToast(r.data.path);
+    } else {
+      alert("下载失败：" + ((r.data && r.data.error) || "未知错误"));
+    }
+  }).catch((e) => alert("下载失败：" + e));
+}
+
+// 给某条 Mock 规则挂一个本地文件：选文件→base64→POST /api/mock/file
+let _mockFileInput = null;
+function _getMockFileInput() {
+  if (!_mockFileInput) {
+    _mockFileInput = document.createElement("input");
+    _mockFileInput.type = "file";
+    _mockFileInput.className = "file-input-hidden";
+    document.body.appendChild(_mockFileInput);
+  }
+  return _mockFileInput;
+}
+
+function attachMockFile(seq) {
+  const input = _getMockFileInput();
+  input.value = "";
+  input.onchange = () => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = (reader.result || "").split(",").pop();
+      const mime = f.type || "application/octet-stream";
+      postJSON("/api/mock/file", { seq, filename: f.name, mime, b64 })
+        .then((r) => {
+          if (r.ok && r.data && r.data.ok) {
+            loadMockApis();
+          } else {
+            alert("挂文件失败：" + ((r.data && r.data.error) || "未知错误"));
+          }
+        })
+        .catch((e) => alert("挂文件失败：" + e));
+    };
+    reader.onerror = () => alert("读取文件失败");
+    reader.readAsDataURL(f);
+  };
+  input.click();
+}
+
+function clearMockFile(seq, btn) {
+  if (btn) { btn.disabled = true; }
+  postJSON("/api/mock/file/clear", { seq })
+    .then((r) => {
+      if (r.ok && r.data && r.data.ok) {
+        loadMockApis();
+      } else {
+        alert("移除失败：" + ((r.data && r.data.error) || "未知错误"));
+      }
+    })
+    .catch((e) => alert("移除失败：" + e))
+    .finally(() => { if (btn) btn.disabled = false; });
+}
+
 startBtn.addEventListener("click", () => {
   const mode = modeSel.value;
   const body = {
@@ -2340,6 +2414,7 @@ if (exportBtn) exportBtn.addEventListener("click", () => go("export"));
 
 wireEditReqModal();
 wireEditResModal();
+wireEditResAttach();
 wireJsonEdits();
 wireGlobalJsonInteractions();
 wireJsonMaxModal();
@@ -2740,9 +2815,9 @@ function refreshEndpointDocs() {
   }).catch(() => {});
 }
 function renderLibrary() {
-  renderLibOutline();
   const pad = $("libraryPad");
   if (!pad) return;
+  renderLibOutline();
   if (libState.view === "detail") renderLibDetail(pad);
   else renderLibList(pad);
   refreshEndpointDocs().then(() => {
@@ -2949,7 +3024,7 @@ function renderLibDetail(pad) {
     $("epTags").appendChild(chip);
   });
   // 字段增删（数据源挂 window.__epDoc，异步加载后会重渲染）
-  window.__epDoc = { name: "", note: "", tags: [], req: [], resp: [] };
+  window.__epDoc = { name: "", note: "", tags: [], req: [], resp: [], match_fields: [] };
   const wireFields = (containerId, key) => {
     const c = $(containerId);
     if (!c) return;
@@ -3118,11 +3193,14 @@ function loadEndpointDoc(method, path, samples) {
     const tags = (d.tags && d.tags.length) ? d.tags : recTags;
     const note = d.note || recNote;
     window.__epDoc = {
+      method,
+      path,
       name: d.name || "",
       note,
       tags,
       req: (d.req && d.req.length) ? d.req : inferred.req,
       resp: (d.resp && d.resp.length) ? d.resp : inferred.resp,
+      match_fields: (d.match_fields && d.match_fields.length) ? d.match_fields : [],
     };
     const nm = $("epName"); if (nm) nm.value = window.__epDoc.name;
     const n = $("epNote"); if (n) n.value = window.__epDoc.note;

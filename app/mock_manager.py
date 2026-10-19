@@ -6,9 +6,11 @@
 - status()：返回运行状态 / URL / 接口数。
 匹配规则与「导出 Mock 脚本」一致：method+path+query 精确 → method+path → 404。
 """
+import base64
 import json
 import threading
 import time
+from urllib.parse import quote
 
 from flask import Flask, request, Response
 from werkzeug.serving import make_server
@@ -19,6 +21,16 @@ EXCLUDE_HEADERS = {
 
 # 处理记录（收到的请求 + 返回数据）最多保留条数，超出丢最旧
 MAX_MOCK_LOGS = 500
+
+
+def _content_disposition(filename):
+    """构造下载头。HTTP 头只能是 latin-1，中文文件名必须走 RFC 5987 的 filename*，
+    外层 filename 用 ASCII 兜底，否则发送响应时会 UnicodeEncodeError。"""
+    name = str(filename or "download")
+    return "attachment; filename=\"%s\"; filename*=UTF-8''%s" % (
+        name.encode("ascii", "replace").decode("ascii"),
+        quote(name, safe=""),
+    )
 
 
 def _norm(p):
@@ -88,6 +100,65 @@ def _body_equal(a, b):
     return na == nb  # dict/list 深度比较（键序无关），否则字符串比较
 
 
+def _split_path(path):
+    """把 a.b.c / a[i].b / a[*].b 拆成 token 序列。"""
+    tokens = []
+    i = 0
+    cur = ""
+    while i < len(path):
+        c = path[i]
+        if c == ".":
+            if cur:
+                tokens.append(("key", cur)); cur = ""
+            i += 1
+        elif c == "[":
+            if cur:
+                tokens.append(("key", cur)); cur = ""
+            j = path.find("]", i)
+            if j < 0:
+                raise ValueError("bad path: " + path)
+            inner = path[i + 1:j].strip()
+            if inner == "*":
+                tokens.append(("star", None))
+            else:
+                tokens.append(("idx", int(inner)))
+            i = j + 1
+        else:
+            cur += c
+            i += 1
+    if cur:
+        tokens.append(("key", cur))
+    return tokens
+
+
+def _get_path_values(obj, path):
+    """按路径从对象取值，返回所有末端值的列表（标量路径返回单元素列表，路径不存在返回空列表）。
+    支持 a.b.c 多层对象、a[i].b 具体索引、a[*].b 数组通配（遍历每个元素收集）。"""
+    try:
+        tokens = _split_path(path)
+    except ValueError:
+        return []
+    results = [obj]
+    for kind, val in tokens:
+        nxt = []
+        if kind == "key":
+            for cur in results:
+                if isinstance(cur, dict) and val in cur:
+                    nxt.append(cur[val])
+        elif kind == "idx":
+            for cur in results:
+                if isinstance(cur, list) and 0 <= val < len(cur):
+                    nxt.append(cur[val])
+        elif kind == "star":
+            for cur in results:
+                if isinstance(cur, list):
+                    nxt.extend(cur)
+        results = nxt
+        if not results:
+            return []
+    return results
+
+
 def _get_store():
     """延迟取 store，避免 mock_manager 与 state 循环导入。"""
     from . import state
@@ -116,17 +187,46 @@ def _make_app(manager):
             status = 404
             body = ""
             headers = {"Content-Type": "text/plain; charset=utf-8"}
-            miss_reason = manager.miss_reason(
+            miss_reason = getattr(manager, "_field_miss_reason", None) or manager.miss_reason(
                 request.method, "/" + path,
                 request.query_string.decode("utf-8", "replace"), req_body)
         else:
             manager._bump_hit(m.get("seq"))
             resp = m.get("response") or {}
+            status = resp.get("status", 200)
+            headers = {k: v for k, v in (resp.get("headers") or {}).items() if k.lower() not in EXCLUDE_HEADERS}
+
+            # 手动挂的文件优先：显式「下载文件」语义，合成 Content-Disposition + Content-Type
+            mf = m.get("mock_file")
+            serve_bytes = None
+            if isinstance(mf, dict) and mf.get("b64"):
+                try:
+                    serve_bytes = base64.b64decode(mf["b64"])
+                except Exception:
+                    serve_bytes = None
+                if isinstance(serve_bytes, bytes):
+                    fname = mf.get("filename") or "download"
+                    mime = (str(mf.get("mime") or "").split(";")[0].strip())
+                    if not mime:
+                        mime = headers.get("Content-Type") or "application/octet-stream"
+                    headers["Content-Type"] = mime
+                    headers["Content-Disposition"] = _content_disposition(fname)
+            # 回放录制到的二进制响应体（如真实下载接口）：原样回放录制头（含 Content-Disposition 则下载）
+            elif resp.get("is_binary") and resp.get("body_b64"):
+                try:
+                    serve_bytes = base64.b64decode(resp["body_b64"])
+                except Exception:
+                    serve_bytes = None
+
+            if isinstance(serve_bytes, bytes):
+                if not headers.get("Content-Type"):
+                    headers["Content-Type"] = resp.get("mime_type") or "application/octet-stream"
+                headers["Content-Length"] = str(len(serve_bytes))
+                return Response(serve_bytes, status=status, headers=headers)
+
             body = resp.get("body") or ""
             if not isinstance(body, str):
                 body = json.dumps(body, ensure_ascii=False)
-            headers = {k: v for k, v in (resp.get("headers") or {}).items() if k.lower() not in EXCLUDE_HEADERS}
-            status = resp.get("status", 200)
 
         # 记录处理日志（收到的请求 + 返回数据），供界面点击查看
         try:
@@ -161,12 +261,14 @@ class MockManager:
         self._lock = threading.Lock()
         self._srv = None
         self._thread = None
-        self.host = "127.0.0.1"
+        self.host = "127.0.0.1"        # 面板显示用环回地址
+        self.bind_host = "0.0.0.0"     # 监听全网卡供VM访问
         self.port = None
         self.data = []
         self.logs = []  # 处理记录（最新追加，logs_list 倒序返回）
         self._hits = {}  # 运行期命中计数：seq -> 次数（start/stop 时清零）
         self.started_at = None
+        self._field_miss_reason = None  # 字段路由未命中时的精确原因，供 miss_reason 使用
 
     def log_request(self, entry):
         """追加一条处理记录；超出 MAX_MOCK_LOGS 丢最旧。"""
@@ -261,7 +363,7 @@ class MockManager:
             srv = None
             for p in candidates:
                 try:
-                    srv = make_server(self.host, p, app, threaded=True)
+                    srv = make_server(self.bind_host, p, app, threaded=True)
                     break
                 except OSError:
                     srv = None
@@ -328,6 +430,38 @@ class MockManager:
         """
         data = _get_store().get_mock_data()
         path = _norm(path)
+        self._field_miss_reason = None
+
+        # —— 接口级字段路由（精确匹配键）——
+        # 读该接口 endpoint_doc.match_fields；若有任意匹配键"有传"则进入字段路由：
+        #   命中返回对应记录；未命中返回 None（路由层 404，不回落 pins/唯一默认）；
+        #   全部匹配键都没传 → 跳过本层，回落现有 pins/strict/fuzzy。
+        mf_doc = _get_store().get_endpoint_doc(method, path)
+        mf_fields = mf_doc.get("match_fields") if isinstance(mf_doc, dict) else None
+        mf_fields = mf_fields or []
+        if mf_fields:
+            actual = _norm_body(req_body)
+            present = {}
+            for f in mf_fields:
+                vals = _get_path_values(actual, f)
+                if vals:
+                    present[f] = vals
+            if present:
+                cands = [r for r in data
+                         if r.get("method") == method and _norm(r.get("path", "") or "") == path]
+                for r in cands:
+                    sample = _norm_body(r.get("req_body"))
+                    ok = True
+                    for f, rvals in present.items():
+                        svals = _get_path_values(sample, f)
+                        if not svals or not all(rv in svals for rv in rvals):
+                            ok = False
+                            break
+                    if ok:
+                        return r
+                miss = "; ".join("%s=%s" % (f, json.dumps(present[f][0], ensure_ascii=False)) for f in present)
+                self._field_miss_reason = "字段路由未命中：%s" % miss
+                return None
 
         pins = [r for r in data
                 if r.get("mock_pin") and r.get("method") == method
@@ -368,26 +502,37 @@ class MockManager:
 
     def apis(self):
         """返回当前正在模拟的接口清单（给前端展示列表用）。实时读取。"""
-        return [
-            {
+        out = []
+        for r in _get_store().get_mock_data():
+            resp = r.get("response") or {}
+            mf = r.get("mock_file")
+            if mf and mf.get("b64"):
+                preview = "📎 %s (%d B)" % (mf.get("filename") or "file", mf.get("size") or 0)
+            elif resp.get("is_binary") and resp.get("body_b64"):
+                preview = "[二进制 %d B]" % (resp.get("size_bytes") or 0)
+            else:
+                preview = _body_preview(resp.get("body"), 160)
+            out.append({
                 "method": r.get("method"),
                 "path": r.get("path") or "",
                 "query": r.get("query") or "",
                 "seq": r.get("seq"),
                 "mock_pin": bool(r.get("mock_pin")),
-                "status": (r.get("response") or {}).get("status", 200),
+                "status": resp.get("status", 200),
                 "hits": self._hits.get(r.get("seq"), 0),
                 "note": r.get("note") or "",
                 "tags": r.get("tags") or [],
-                "body_preview": _body_preview((r.get("response") or {}).get("body"), 160),
-                "body_view": _body_preview((r.get("response") or {}).get("body"), 8000),
-                "body_pretty": _body_pretty((r.get("response") or {}).get("body")),
+                "is_binary": bool(resp.get("is_binary") and resp.get("body_b64")),
+                "has_file": bool(mf and mf.get("b64")),
+                "mock_file": ({"filename": mf.get("filename"), "size": mf.get("size")} if (mf and mf.get("b64")) else None),
+                "body_preview": preview,
+                "body_view": preview,
+                "body_pretty": preview,
                 "req_body_preview": _body_preview(r.get("req_body"), 160),
                 "req_body_view": _body_preview(r.get("req_body"), 8000),
                 "req_body_pretty": _body_pretty(r.get("req_body")),
-            }
-            for r in _get_store().get_mock_data()
-        ]
+            })
+        return out
 
     def _url(self):
         if self.port is None:
